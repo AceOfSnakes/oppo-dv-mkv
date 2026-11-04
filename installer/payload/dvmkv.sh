@@ -21,4 +21,11 @@ fi
 [ -f $D/bdpaudec.db ] && log "audio: /res/bdpaudec.db -> $(ls -l /res/bdpaudec.db 2>/dev/null | sed 's/.*-> //')"   # set by the wrapper
 [ -f $D/subs.sh ] && sh $D/subs.sh 2>&1 | while read l; do log "subs: $l"; done   # improved subtitles
 [ -f $D/fpage.sh ] && sh $D/fpage.sh on 2>&1 | while read l; do log "menu: $l"; done   # factory menu shortcut
+# extras: separate add-ons, each in its own folder (README: Extras). Started in the background so a slow or stuck
+# one never holds up the others or the health mark; a "disable" file in its folder skips it.
+for x in ${OPPODV_EXTRAS:-/mnt/ubi_boot/oppo-dv-mkv-extras}/*/start.sh; do
+  [ -f "$x" ] || continue; xd=${x%/start.sh}; n=${xd##*/}
+  [ -e "$xd/disable" ] && { log "$n: skipped (disable file)"; continue; }
+  ( sh "$x" 2>&1 | while read l; do log "$n: $l"; done ) &
+done
 sleep 90; [ -d /proc/$P ] && { rm -f $D/bootcount; sync; log "boot marked healthy"; }
