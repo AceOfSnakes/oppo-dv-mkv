@@ -50,6 +50,7 @@ option, and grey text colours for comfortable, dimmer subtitles on HDR and Dolby
 - [What was broken, and how it was fixed](#what-was-broken-and-how-it-was-fixed)
 - [Tests](#tests)
 - [How it is installed on the player](#how-it-is-installed-on-the-player)
+- [Extras (for other modders)](#extras-for-other-modders)
 - [Building from source](#building-from-source)
 - [Credits](#credits)
 - [Changelog](#changelog)
@@ -299,6 +300,8 @@ are not.
   - if the player program crashes within 120 seconds of a patched start. In this case it reboots once with the
     patches disabled.
 - Logs on the player: `/mnt/ubi_boot/oppo-dv-mkv/dvmkv.log` and `wrapper.log`.
+- **Extras** (add-ons in `/mnt/ubi_boot/oppo-dv-mkv-extras/`) are not removed by the uninstaller; without oppo-dv-mkv
+  they simply no longer start. They follow the same fail-safes: when the patches are skipped, so are the extras.
 
 ## Known limitations
 
@@ -733,6 +736,13 @@ Kernel counters showed whether any hook ran.
 | ... installed persistently, after a reboot | `sarfix: on (on)` in the boot log, together with every other patch; boot marked healthy |
 | Installer, offline: every scenario, including updating from v1.5.0 and v1.6.0 | all pass (50 steps); the update adds `sarfix.sh`, and the check zip reports it (`pixel AR:`) |
 
+### Extras (v1.7.1)
+
+| Test | Result |
+|---|---|
+| The extras loop, offline: one normal extra, one that hangs for 30 s, one with a `disable` file | the loop returns at once; the normal one logs, the disabled one is skipped (`skipped (disable file)`), the hung one delays nothing |
+| RU player, updated in place from v1.7.0 (only `dvmkv.sh` replaced), with one extra that serves an HTTP endpoint, power-cycled | every patch on by 15 s, the extra started at 16.8 s and answers, `boot marked healthy` at 105 s, no `bootcount` / `disable` left |
+
 ### Final regression run (persistent install, fresh boot)
 
 | Test | Result |
@@ -770,6 +780,7 @@ program if that file exists. The installer puts there:
 /mnt/ubi_boot/oppo-dv-mkv/alacdec.bin, bdpaudec.db  ALAC audio decoder of firmware 56/60 and the player's audio decoder
                                       file with it, built at install time, swapped into /res at boot
 /mnt/ubi_boot/oppo-dv-mkv/fpage.sh    factory menu shortcut (one layout per regional v65 player program; on|off|status|check)
+/mnt/ubi_boot/oppo-dv-mkv-extras/     optional add-ons by other authors, started at boot (see Extras; not installed by oppo-dv-mkv)
 ```
 
 Before writing a single byte, every patcher verifies every patch site: the exact original instructions must be in
@@ -779,6 +790,27 @@ they do nothing. The installer refuses to overwrite an existing `/mnt/ubi_boot/b
 mod.
 
 Details (addresses, hook points, data structures, debug switches): [docs/TECHNICAL.md](docs/TECHNICAL.md).
+
+## Extras (for other modders)
+
+Since v1.7.1 oppo-dv-mkv can start other people's add-ons at boot, so a mod can ship on its own, without forking
+oppo-dv-mkv, and keeps working across oppo-dv-mkv updates. An extra is a folder:
+
+```
+/mnt/ubi_boot/oppo-dv-mkv-extras/<name>/start.sh    run at every boot
+/mnt/ubi_boot/oppo-dv-mkv-extras/<name>/disable     optional: while it exists, the extra is skipped
+```
+
+- `dvmkv.sh` runs each `start.sh` with `sh`, as root, after the player is up and oppo-dv-mkv's own patches are in.
+  Each one starts in the background, so a slow or stuck extra never holds up the others or the boot.
+- What it prints goes to `dvmkv.log`, prefixed with the folder name (`<name>: ...`).
+- Extras run only when the patches run: the same fail-safes apply (two boots that never reach healthy, or a player
+  crash within 120 s, switch everything off, extras included). A broken extra can therefore switch oppo-dv-mkv's
+  patches off too, so test it well.
+- An extra must not patch the player program, `liblp.so` or the kernel sites that oppo-dv-mkv patches
+  ([docs/TECHNICAL.md](docs/TECHNICAL.md) lists them), and must not change files in `/mnt/ubi_boot/oppo-dv-mkv/`.
+- An extra brings its own installer and uninstaller; oppo-dv-mkv neither installs nor removes extras. Writing to
+  `/mnt/ubi_boot` already takes root, so the folder grants nothing new.
 
 ## Building from source
 
@@ -802,6 +834,9 @@ each blob is printed. No firmware files are needed or included.
 
 ## Changelog
 
+- **v1.7.1: extras.** Separate add-ons in `/mnt/ubi_boot/oppo-dv-mkv-extras/<name>/start.sh` start at every boot,
+  in the background, after the patches; a `disable` file in an extra's folder skips it. See
+  [Extras](#extras-for-other-modders). No change to any patch.
 - **v1.7.0: Dolby Vision for MKVs without VPS/SPS/PPS in the hvcC; non-square pixels no longer stretched.**
   - **Dolby Vision for profile 5/8 MKVs without VPS/SPS/PPS in the hvcC** (typical of MKVs remuxed from an `hev1`
     MP4). They played the stock way (purple/green for profile 5) and started a few seconds late. A 16-instruction
