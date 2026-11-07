@@ -543,6 +543,26 @@ function matches nothing and is left alone, while one changed elsewhere (another
 The AU program shows why the data fingerprints matter: its factory-menu code is byte-identical to RU's at the same
 address, but its read-only data is 8 bytes off, so only the `"$$$"` fingerprint keeps it from using the RU layout.
 
+## Extras hook (v1.7.1)
+
+The last step of `dvmkv.sh` before the 90-second health mark:
+
+```sh
+for x in ${OPPODV_EXTRAS:-/mnt/ubi_boot/oppo-dv-mkv-extras}/*/start.sh; do
+  [ -f "$x" ] || continue; xd=${x%/start.sh}; n=${xd##*/}
+  [ -e "$xd/disable" ] && { log "$n: skipped (disable file)"; continue; }
+  ( sh "$x" 2>&1 | while read l; do log "$n: $l"; done ) &
+done
+```
+
+- It runs only when the wrapper starts `dvmkv.sh`, i.e. when the fail-safes allow patches (no `disable`, bootcount
+  below 2). A player crash within 120 s of a patched start disables everything, extras included.
+- Each extra runs in its own background subshell: a hung `start.sh` can't delay the health mark, so it can't make
+  the bootcount fail-safe switch oppo-dv-mkv's patches off. Its output still reaches `dvmkv.log` while it runs.
+- Extras must stay off the sites listed in this document (liblp.so hooks, the bdpdrv1 code cave and hooks, the
+  splitter.ko stub, the player program's subtitle and menu sites) and off `/res` swaps that the wrapper makes.
+- `OPPODV_EXTRAS` overrides the folder (tests).
+
 ## Debugging tips (for developers)
 
 - The kernel log goes to `/proc/kmsg`.
