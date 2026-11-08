@@ -58,6 +58,7 @@ the subtitles of most ordinary MP4 films. See [MP4 files](#mp4-files-v180).
 - [Extras (for other modders)](#extras-for-other-modders)
 - [Building from source](#building-from-source)
 - [Credits](#credits)
+- [Supporting this work](#supporting-this-work)
 - [Changelog](#changelog)
 
 ## What it does
@@ -983,6 +984,17 @@ each blob is printed. No firmware files are needed or included.
 - Reverse engineering, patches and testing: fandangos, together with Claude (Anthropic) as co-author.
 - The black letterbox bar fix (v1.6.0) was found and tested by a user in
   [issue #5](https://github.com/fandangos/oppo-dv-mkv/issues/5).
+
+## Supporting this work
+
+I build this in my free time. If it's useful to you and you'd like to say thanks, you can sponsor me on GitHub or buy
+me some popcorn on Ko-fi. It's a thank-you, not a support contract: donations don't buy priority, deadlines or feature
+requests.
+
+<p>
+  <a href="https://github.com/sponsors/fandangos"><img alt="Sponsor on GitHub" src="https://img.shields.io/badge/GitHub%20Sponsors-fandangos-ea4aaa?style=flat-square&logo=githubsponsors&logoColor=white"></a>
+  <a href="https://ko-fi.com/vitordallacqua"><img alt="Support on Ko-fi" src="https://img.shields.io/badge/Ko--fi-vitordallacqua-ff5e5b?style=flat-square&logo=kofi&logoColor=white"></a>
+</p>
 
 ## Changelog
 
