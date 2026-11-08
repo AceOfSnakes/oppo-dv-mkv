@@ -9,6 +9,10 @@ option, and grey text colours for comfortable, dimmer subtitles on HDR and Dolby
 
 **Plus a factory menu shortcut:** opens Oppo's hidden service page (versions, region codes) with the normal remote.
 
+**Plus MP4 files (v1.8.0):** Dolby Vision profile 8 from MP4, audio and subtitle languages in the menus, MP4 text
+subtitles, chapters, a language list for files with many tracks, and a fix for a bug in Oppo's own code that hid
+the subtitles of most ordinary MP4 films. See [MP4 files](#mp4-files-v180).
+
 ---
 
 > ## ⚠️ DISCLAIMER: READ THIS FIRST
@@ -40,6 +44,7 @@ option, and grey text colours for comfortable, dimmer subtitles on HDR and Dolby
 ## Contents
 - [What it does](#what-it-does)
 - [Better subtitles](#better-subtitles)
+- [MP4 files (v1.8.0)](#mp4-files-v180)
 - [Factory menu](#factory-menu)
 - [Requirements](#requirements)
 - [Compatibility](#compatibility)
@@ -120,6 +125,49 @@ fix is unaffected. **Only the RU program has been tested on a real player so far
 offline against the regional programs and the programs from testers' dumps (see [Tests](#tests)). With the jb_overlay dark theme, the colour squares in
 the subtitle menu keep the theme's colours (the subtitles themselves change). If your player is skipped, make a
 [full dump](#helping-to-support-another-firmware-full-dump) and share it privately.
+
+## MP4 files (v1.8.0)
+
+MP4 (and M4V) files get the same care as MKVs. These improvements are part of the **Dolby Vision MKV fix** (they live
+in the same `liblp.so` patch), so they come with the `full`, `mkv-subtitles` and `mkv-only` zips.
+
+| MP4 file | Stock firmware | With oppo-dv-mkv |
+|---|---|---|
+| Dolby Vision profile 8 (`dvvC` record, most DV MP4s) | purple/green picture, or the player froze | **Dolby Vision** |
+| Audio and subtitle languages | blank in the menus | **shown** (English, Portuguese ...) |
+| Text subtitles (`tx3g`, what ffmpeg calls `mov_text`; written by ffmpeg, HandBrake and most MP4 tools) | not listed, never shown | **shown**, with the right timing |
+| Chapters (Nero `chpl`, stored in `moov/udta` by every muxer) | ignored, no chapter skips | **chapters and chapter skips** |
+| More than 8 audio or 8 subtitle tracks | the first 8 of each in the file | **your languages first** ([language list](#language-list)) |
+| **Subtitles in most ordinary MP4 films** (any subtitle format) | **never shown** (Oppo's bug, see below) | **shown** |
+
+**Oppo's bug: MP4 subtitles that never appear.** The player has a special reading mode for MP4 files whose audio and
+video are badly interleaved (stored far apart in the file). In that mode it never reads the subtitle track at all, for
+any subtitle format, including the VobSub and TTML subtitles that stock firmware supports. Oppo's code also forces this
+mode, without looking at the file, for every MP4 with **2 or more audio tracks and 2 or more subtitle tracks**, and for
+every MP4 **larger than 512 MB with an average bit rate up to about 7.2 Mbit/s**. That covers most ordinary 1080p MP4
+films, even with a single audio track: a 141 MB cut of a film showed its subtitles, a 592 MB cut of the same film, with
+the same tracks, showed none. v1.8.0 removes those two rules; Oppo's real interleave check still chooses that mode for
+files that really need it, exactly as before. Dolby Vision MP4s never used the mode, so they are unchanged. Details:
+[fix 15](#15-mp4-subtitles-hidden-by-the-bad-interleave-mode-v180).
+
+### Language list
+
+The player can use at most **8 audio and 8 subtitle tracks** of a file (its menus, its memory and its demuxer all
+stop at 8). Most files have fewer, and nothing changes for them. Multi-language files can carry 11 audio and 40
+subtitle tracks; stock firmware keeps the first 8 of each in file order and never shows the others, often missing
+the language you want.
+
+Zips with the Dolby Vision part contain **`oppo-dv-mkv-languages.txt`** next to the `AutoScript` folder. Write your
+languages in it, one per line, most wanted first (2- or 3-letter codes, the table is in the file), then run the
+installer. For a file with more than 8 tracks of a kind, the 8 are then chosen like this:
+1. audio only: the file's **default audio track always stays** (usually the original language);
+2. every track of your first language (normal, SDH, forced ...), then of your second language, and so on;
+3. the slots still free get the other tracks in file order, except subtitle tracks of other languages that only have
+   a few lines (forced-only tracks): after a seek the player reads from the position of their current line, which can
+   be minutes back, and seeks and chapter skips took 20 to 50 seconds.
+
+The menus list the chosen tracks in file order. Running the installer again without the file on the stick keeps your
+list; the file as shipped (no languages) switches the list off. `dvmkv.log` shows `dvhook: MP4 language list: en pt`.
 
 ## Factory menu
 
@@ -272,7 +320,7 @@ it privately.
    Every part is checked on its own (see [Compatibility](#compatibility)). A part that cannot be installed safely on
    your player is skipped, and the others are still installed.
 2. Unzip it to the **root** of a FAT32 USB stick. You should see `AutoScript/` and `README.txt` at the top level of
-   the stick.
+   the stick (and `oppo-dv-mkv-languages.txt` in zips with the Dolby Vision part, see [Language list](#language-list)).
 3. Power the player **off**. Plug the stick into the **rear** USB port, and make sure no other USB storage is
    connected. Power the player **on**.
    - At boot the player runs `AutoScript/install.sh` from the stick. It takes a second or two.
@@ -314,7 +362,23 @@ are not.
   demuxer check fails on a firmware we have not seen (the `hvccfix:` line in `dvmkv.log`), they play the stock way,
   as before v1.7.0; remuxing them so the parameter sets are in the hvcC (for example mkvmerge from the extracted HEVC
   stream) makes them work there.
-- **MP4 files with Dolby Vision** are not covered; they freeze the player even on stock firmware.
+- **MP4 files with Dolby Vision:** profile 8 (`dvvC`) plays in Dolby Vision since v1.8.0, and a single-track
+  profile 7 FEL MP4 was tested too. Other MP4 variants (dual-track, profile 5) are untested.
+- **PGS subtitles in MKV after switching from a text subtitle (Oppo's bug, not caused by oppo-dv-mkv).** PGS
+  (Blu-ray picture) subtitles only appear if playback **starts** on the PGS track. When the player starts on a text
+  subtitle (SRT or ASS, for example because it is the first subtitle track) and you switch to a PGS track, nothing
+  is shown: the PGS data reaches Oppo's text subtitle decoder, which receives it but never draws it (its log says
+  "PG decoder ready" and "data consumed"). oppo-dv-mkv does not change the code that handles PGS. Files whose
+  subtitles are all PGS (typical Blu-ray remuxes) are not affected. A fix is being investigated.
+- **MP4: at most 8 audio and 8 subtitle tracks** per file (the player's limit); the [language list](#language-list)
+  chooses which.
+- **MP4 subtitles in files that are really badly interleaved** (Oppo's real interleave check still picks its special
+  reading mode for them, see [fix 15](#15-mp4-subtitles-hidden-by-the-bad-interleave-mode-v180)) are still not
+  shown. Common muxers interleave audio and video closely; files made with ffmpeg were tested and are not affected.
+- **MP4 chapters stored only as a chapter text track** (no Nero `chpl`) are not shown; the firmware has no code for
+  them. ffmpeg writes both.
+- **MKVs edited in place so that their track list moved to the end of the file** (mkvpropedit does this when the new
+  values do not fit) do not play at all on this player, also on stock firmware. Remux them with mkvmerge.
 - **Player-led (LLDV) mode** was not tested.
 - At the exact point of a **seek** or a fast-forward step, one or two enhancement-layer pictures may fail to decode.
   This is invisible in practice, and the base layer and audio are unaffected.
@@ -332,7 +396,7 @@ are not.
   the patcher logs a mismatch and does nothing.
 - **Check that it is active:** `dvmkv.log` on the player should contain `dvhook: dvhook ON`, `p7kel: p7kel ON`,
   `bgfix: on (on)` (since v1.6.0), `sarfix: on (on)`, `hvccfix: on (on)` and `dvhook: empty hvcC (no VPS/SPS/PPS):
-  DV allowed` (since v1.7.0) and `boot marked healthy`.
+  DV allowed` (since v1.7.0), `dvhook: MP4 language list: ...` (since v1.8.0) and `boot marked healthy`.
 
 ## What was broken, and how it was fixed
 
@@ -571,6 +635,70 @@ fix) scales both numbers down, rounded, until they are no larger than a normal p
 0.05%, about one line. Square-pixel pictures already fit and get exactly the stock values. The patched code is the
 same in every firmware we have (RU, USA, Cambridge CXUHD).
 
+### 14. Dolby Vision profile 8 in MP4 (v1.8.0)
+
+**Symptom:** a profile 8.1 MP4 played with a purple and green picture and the TV never switched to Dolby Vision; a
+GPAC-made profile 8.1 MP4 froze the player.
+
+**Cause:** the MP4 parser in `liblp.so` reads the Dolby Vision record only from a `dvcC` box. Profile 8 files carry
+the same 4-byte record in a `dvvC` box, so the player opened a Dolby Vision stream with no profile and no metadata.
+
+**Fix:** two compare instructions in the parser branch to a 3-instruction shim that also accepts `dvvC` (part of
+`dvhook.sh`). The log then shows `Profile[8 1]`, the TV switches to Dolby Vision with correct colours, seeks work.
+
+### 15. MP4 subtitles hidden by the bad-interleave mode (v1.8.0)
+
+**Symptom:** in many MP4 files no subtitle ever appears, whichever track is chosen in the menu, although the menu
+lists them. It looked random: one file worked, a longer cut of the same film did not, and adding a second audio
+track to a working file broke it.
+
+**Cause (Oppo's code, also on stock firmware):** before playing an MP4, the parser decides whether the file is
+*badly interleaved* (audio and video stored far apart). If so, the player reads video and audio with two separate
+readers in the kernel demuxer. A third range for the subtitles is prepared but never handed over, so the demuxer
+never visits a subtitle sample (its debug log says `disable SPS` at every step), for every subtitle format. Besides
+a real check of the file, the decision has two rules that do not look at the file at all:
+- **2 or more audio tracks and 2 or more subtitle tracks** (Oppo's own log line:
+  `(m_uAtrackCount >= 2 && m_uSptrackCount >= 2 ) bad interleave`);
+- **more than 512 MB with an average bit rate up to 7167999 bit/s** (log: `need set badleavefile(>512MB)`), which
+  matches most 1080p films shorter than about 2 h 19 min.
+
+Dolby Vision MP4s skip the whole decision, which is why a Dolby Vision film with 11 audio and 42 subtitle tracks
+showed its subtitles.
+
+**Fix:** two branch instructions in `fgAllocateTableForBadInterLeaveFile` skip the two rules (part of `dvhook.sh`).
+Oppo's real check still runs: video and audio more than 3 seconds apart, or the first audio data far from the first
+video data. Files that really are badly interleaved keep the special mode, and with it the stock behaviour. Tested
+with deliberately broken files: one with its only audio track stored after all the video still gets the mode, as on
+stock; one with a second audio track appended at the end of the file plays that track silently in both modes, so the
+rules never protected such files.
+
+### 16. MP4 text subtitles, languages and the 8 tracks (v1.8.0)
+
+**Symptom:** MP4 text subtitles (`tx3g`) were not listed at all, and the audio and subtitle menus showed no language
+names.
+
+**Cause:** the parser accepted only `subp`/`subt` subtitle tracks with VobSub or TTML samples and dropped `tx3g`;
+Apple-style files also use the `sbtl` handler. The MP4 player code sent language codes to the menus only for
+external subtitle files. MP4 text samples carry a 2-byte length before the text and reach the subtitle decoder with
+no end time, so a line would only blink.
+
+**Fix (`dvhook.sh`):** `sbtl` and `tx3g` are accepted (8 subtitle tracks at most: a 9th track record overlaps other
+parser data, a stock bug, and the demuxer only takes 8); the text track is described to the decoder as UTF-8 text;
+each sample's length prefix and style data are stripped and the line gets an end time (the start of the next line
+already queued, else 3 seconds); language codes are read from every track (`mdhd`, versions 0 and 1) and sent to the
+menus the way the MKV player does. The [language list](#language-list) chooses the 8 tracks when a file has more:
+a pre-scan of the track headers before the parser registers them, and the tracks left out are skipped.
+
+### 17. MP4 chapters (v1.8.0)
+
+**Symptom:** MP4 files with chapters showed none, and the chapter-skip buttons jumped to the next file.
+
+**Cause:** the firmware does read Nero chapters (`chpl`), but only when the box sits directly in `moov`. Every muxer
+writes it in `moov/udta`, which the parser never enters. QuickTime chapter text tracks are not supported at all.
+
+**Fix:** `dvhook.sh` reads `moov/udta/chpl` itself and fills the parser's chapter table (up to 32 chapters, the
+first one starting at 0, as the MKV player does).
+
 ## Tests
 
 All tests were run on one Oppo UDP-203 with the RU 65-0131 jailbreak, connected through an AV receiver to a Dolby
@@ -743,6 +871,30 @@ Kernel counters showed whether any hook ran.
 | The extras loop, offline: one normal extra, one that hangs for 30 s, one with a `disable` file | the loop returns at once; the normal one logs, the disabled one is skipped (`skipped (disable file)`), the hung one delays nothing |
 | RU player, updated in place from v1.7.0 (only `dvmkv.sh` replaced), with one extra that serves an HTTP endpoint, power-cycled | every patch on by 15 s, the extra started at 16.8 s and answers, `boot marked healthy` at 105 s, no `bootcount` / `disable` left |
 
+### MP4 files (v1.8.0)
+
+Test files: a synthetic suite (test pattern with a running clock, one tone per audio track, every subtitle line
+naming its format, language, track, number and time) with tx3g, VobSub and TTML subtitles, 1 to 11 audio and up to
+14 subtitle tracks, `chpl` in `moov` and in `moov/udta`, and chapter-track-only files; cuts of a real film made with
+ffmpeg (video and audio copied, its subtitle files as `mov_text`); deliberately badly interleaved versions; and a
+Dolby Vision profile 8.1 MP4 with 11 audio and 42 subtitle tracks. Subtitle delivery was measured automatically by
+counting the text lines the subtitle decoder receives, and the kernel demuxer's debug log showed which samples it
+reads.
+
+| Test | Stock | v1.8.0 |
+|---|---|---|
+| Real film cut, 141 MB, 1 audio + 2 subtitles | subtitles shown | ✅ shown |
+| Same film, 592 MB cut, same tracks | **no subtitles** | ✅ shown (Portuguese, checked on screen with sound) |
+| Synthetic, 2 / 3 / 8 / 9 audio tracks + 2 to 4 subtitles (AC-3, E-AC-3, AAC; ffmpeg and MP4Box) | **no subtitles** | ✅ shown |
+| 11 audio + 14 subtitles, language list EN PT | first 8 of each, no subtitles | ✅ default audio + EN/PT tracks first, forced-only tracks of other languages left out, subtitles shown, switching audio and subtitle tracks and seeking keep them |
+| Only audio track stored after all the video | special mode, plays, no subtitles | same as stock (Oppo's real check) |
+| Second audio track appended at the end | that track silent, no subtitles | that track silent, ✅ subtitles shown |
+| Dolby Vision profile 8.1 MP4 (`dvvC`), and a profile 7 FEL MP4 | purple/green or freeze | ✅ Dolby Vision on the TV |
+| Dolby Vision profile 8.1 film, 11 audio + 42 subtitle tracks | no DV, no languages, no text subtitles | ✅ DV, languages, subtitles on time, chapters, language list |
+| Chapters: `chpl` in `moov/udta` / in `moov` / chapter track only | none / 4 / none | ✅ 4 / 4 / none (known limit) |
+| Regression suite (MKV with SRT, ASS, PGS, VobSub; MP4 with VobSub, TTML, chapters; DV MKV and MP4 files) | | ✅ 13 of 13 |
+| Installer: fresh install, updates from v1.4.0 to v1.7.1, uninstall, check only, RU, jb_overlay, CXUHD, unsupported firmware | | ✅ 66 of 66 steps |
+
 ### Final regression run (persistent install, fresh boot)
 
 | Test | Result |
@@ -833,6 +985,23 @@ each blob is printed. No firmware files are needed or included.
   [issue #5](https://github.com/fandangos/oppo-dv-mkv/issues/5).
 
 ## Changelog
+
+- **v1.8.0: MP4 files.** Part of the Dolby Vision MKV fix (`dvhook.sh`); see [MP4 files](#mp4-files-v180).
+  - **Subtitles in most MP4 films:** fixed a bug in Oppo's code that hid every subtitle (any format) in MP4 files with
+    2 or more audio and 2 or more subtitle tracks, and in MP4 files over 512 MB below about 7.2 Mbit/s. See
+    [fix 15](#15-mp4-subtitles-hidden-by-the-bad-interleave-mode-v180).
+  - **Dolby Vision profile 8 MP4s** (`dvvC`) play in Dolby Vision. See [fix 14](#14-dolby-vision-profile-8-in-mp4-v180).
+  - **MP4 text subtitles** (`tx3g` / `mov_text`) are shown, with the right timing; **audio and subtitle languages**
+    appear in the menus. See [fix 16](#16-mp4-text-subtitles-languages-and-the-8-tracks-v180).
+  - **MP4 chapters** (Nero `chpl` in `moov/udta`) work, chapter skips included. See [fix 17](#17-mp4-chapters-v180).
+  - **Language list** (`oppo-dv-mkv-languages.txt` on the stick) chooses the 8 audio and 8 subtitle tracks of files
+    with more, default audio first; forced-only subtitle tracks of other languages are left out, so seeks stay fast.
+    See [Language list](#language-list).
+  - Known limitation found while testing, **Oppo's bug, not caused by oppo-dv-mkv:** in MKVs, PGS subtitles only
+    appear if playback starts on the PGS track; switching to PGS from a text subtitle shows nothing. See
+    [Known limitations](#known-limitations).
+  - Updating from v1.7.1 replaces `dvhook.sh` and `dvmkv.sh` and adds `languages.txt` (from the stick, if present);
+    the other files stay as they are.
 
 - **v1.7.1: extras.** Separate add-ons in `/mnt/ubi_boot/oppo-dv-mkv-extras/<name>/start.sh` start at every boot,
   in the background, after the patches; a `disable` file in an extra's folder skips it. See

@@ -9,7 +9,8 @@
 #   /mnt/ubi_boot/bdpprog.prev          the jb_overlay boot script, if that mod was installed (the wrapper chains to it)
 #   /mnt/ubi_boot/oppo-dv-mkv/          dvmkv.sh + the installed parts: dvhook.sh, p7kel.sh, bgfix.sh, sarfix.sh, hvccfix.sh,
 #                                       alacdec.bin, bdpaudec.db (Dolby Vision MKV fix), subs.sh, image_bdp83.bin
-#                                       (subtitles), fpage.sh (factory menu). RAM patches applied at every boot.
+#                                       (subtitles), fpage.sh (factory menu), languages.txt (MP4 language list, from
+#                                       oppo-dv-mkv-languages.txt on the stick). RAM patches applied at every boot.
 # Nothing in the firmware itself is modified. Log: oppo-dv-mkv.log in the root of the USB stick.
 VERSION=@VERSION@
 S=${OPPODV_SRC:-/mnt/sda1/AutoScript}                 # this folder on the stick
@@ -194,6 +195,12 @@ if [ -n "$DV" ]; then
     sync; [ "$(m5 $I)" = 31b1901fc4114ea4911ff04757959651 ] && mv $I $D/bdpaudec.db && sync \
       && echo "  $D/bdpaudec.db built" || { rm -f $I; echo "  audio decoder file could not be built (skipped)"; }
   fi
+fi
+if [ -n "$DV" ]; then   # MP4 audio/subtitle language list: oppo-dv-mkv-languages.txt next to the AutoScript folder
+  LS=${S%/*}/oppo-dv-mkv-languages.txt
+  if [ -f $LS ]; then put $LS $D/languages.txt || fail "writing $D/languages.txt"
+    l=$(echo $(tr -d '\r' < $LS | grep -v '^[[:space:]]*#' | awk 'NF{print $1}')); echo "  MP4 language list: ${l:-none (the player keeps the first 8 tracks)}"
+  elif [ -f $D/languages.txt ]; then echo "  $D/languages.txt kept (no oppo-dv-mkv-languages.txt on the stick)"; fi
 fi
 [ -z "$MENU" ] && [ -e $D/fpage.sh ] && rm -f $D/fpage.sh && echo "  factory menu shortcut not installed now: older copy removed"
 if [ -n "$SUBS" ]; then

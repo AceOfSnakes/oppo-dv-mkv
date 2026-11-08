@@ -14,6 +14,7 @@ The hardware is a MediaTek MT8581 (4× Cortex-A9) running Linux 3.10.
 | Part | Target | Patcher | Blob source |
 |---|---|---|---|
 | MKV Dolby Vision signalling | `liblp.so` inside the running `bdpprog.1` (via `/proc/<pid>/mem`) | `dvhook.sh` | `src/liblp/` |
+| MP4: Dolby Vision profile 8, languages, text subtitles, chapters, language list, subtitles in "bad interleave" mode (v1.8.0) | `liblp.so` (same as above) | `dvhook.sh` | `src/liblp/`, `src/liblp/mp4/` |
 | Profile 7 decoder fixes | `bdpdrv1` kernel module (via `/dev/mem`) | `p7kel.sh` | `src/kernel/` |
 | Black letterbox bars in Dolby Vision (v1.6.0) | `bdpdrv1` kernel module (via `/dev/mem`), one instruction | `src/kernel/bgfix.sh` | none |
 | Non-square pixels stretched to 16:9 (v1.7.0) | `bdpdrv1` kernel module (via `/dev/mem`), two branches + a 30-word stub | `src/kernel/sarfix.sh` | `src/kernel/sar.S` |
@@ -55,6 +56,74 @@ Pitfalls:
 - In `MPC_DOVI_INFO_T`, bytes 8 and 9 are **not** profile/level (they are an ID / VS10 flag) and must stay 0.
   Profile and level belong only in the video info.
 - Profile 5 needs the correct profile/level; profile 8.1 tolerates 0.
+
+## Part 1b: liblp.so, MP4 files (v1.8.0)
+
+Same library, same rules (file offset = runtime offset from the load base). Everything below is installed by the
+same `dvhook.sh` as Part 1 and switched on and off with it; every code word and data word is checked before it is
+written.
+
+**Memory.**
+
+| What | Offset | Size | Notes |
+|---|---|---|---|
+| Part 1 blob + `dvvC` shims | `0x6cdc00` | 950 of 0x400 | RX padding |
+| MP4 main blob (shims, hooks, ISO 639 table, chapters) | `0x5402fc` | 0xae8 | over `vMPCTestOperation4`, an MPC self-test only called by other self-tests |
+| MP4 pre-scan blob | `0x530de8` | 0x9e4 | over `vMPCTestDvdRwdSpeedThr` (self-test thread entry) |
+| MP4 state | `0x757e80` | 0xe8 | bss slack: parser pointer, languages by track_ID, tx3g mask, language list, skip bitmap, counters |
+
+Blob code addresses its own tables as `base + link address` (a plain table read would hit the player program).
+
+**Sites.**
+
+| Site | Stock | Patched | Purpose |
+|---|---|---|---|
+| `0x42c470`, `0x42eb08` | `cmp r3, r2` (`dvcC`) | `b` shim | `vMP4STSDHandle` read the Dolby Vision record only from `dvcC`; profile 8 files carry it in `dvvC` |
+| `0x403f18` | `cmp r1, r2` (hdlr vs `subp`) | `b m_hdlr` | accept the `sbtl` handler as a subtitle track (max 8) |
+| `0x4291d4` | `mov r3, #15` (drop) | `b m_stsd` | keep `tx3g` sample entries (stock kept only `stpp` and `mp4s`) |
+| `0x3faba8` | `bl vSetExtSubLanguage` | `bl m_lang` | send the audio and subtitle language codes to the menus (PB message 0x42) |
+| `0x58a0f0` | `bl mrSpsDecStringByFmtSRT` | `bl m_srt` | turn a tx3g sample into text (strip the 2-byte length and style boxes) and give it an end time |
+| `0x4079fc` | `bls 0x407a24` | `b 0x407a24` | bad-interleave rule "audio >= 2 && subtitle >= 2": run the real check instead (see below) |
+| `0x408204` | `bhi 0x408238` | `b 0x408238` | bad-interleave rule "> 512 MB && <= 7167999 bit/s": skipped |
+| `.data 0x6ee3a4` | `vMP4MOOVHandle` | `m_moov` | reset state, pre-scan the tracks (language list), read Nero chapters from `moov/udta/chpl` |
+| `.data 0x6ee2a0` | `vMP4MDHDHandle` | `m_mdhd` | language by track_ID (mdhd v0 and v1; v1 puts it past the 0x28 bytes the box walker reads) |
+| `.data 0x6ee2b4` | `vMP4HDLRHandle` | `m_hdlrbox` | leave out the tracks the language list did not choose |
+| GOT `0x6e25c0` | `CLpMp4Parser::mrGetStreamInfo` | `m_gsi` | tx3g stream records: UTF-8 text (format 9), video size |
+
+**tx3g timing.** MP4 text samples reach the subtitle decoder with no end time, so a line only blinked. A line given
+an end time holds the screen until then and later lines are ignored. `m_srt` uses the start time of the next text
+sample already queued in the decoder (ring at decoder `+0xaa8`), else start + 3 s.
+
+**Language list and the 8-track limit.** The parser stores at most 8 audio and 8 subtitle tracks (a 9th subtitle
+record overlaps other parser fields, and the demuxer configuration only takes 8). With more, `m_moov` pre-scans the
+`trak` boxes (handler, `mdhd` language and duration, `stsd` entry type, `stsz` sample count) and chooses: the
+default audio track, then every track of the listed languages in list order, then the rest in file order, leaving
+out subtitle tracks of unlisted languages with fewer than 1 sample per 30 s of their duration (forced-only tracks:
+after a seek the demuxer reads from the position of their current sample, which can be minutes back). `m_hdlrbox`
+then skips the stock handler for the tracks left out, so the parser never registers them.
+
+**Chapters.** The box walker dispatches `chpl` only directly under `moov` and never enters `udta`, where every muxer
+writes it. `m_moov` walks `moov`'s children itself and fills the parser's Nero chapter table (+`0xb8c8` version,
++`0xb8cc` count, max 32, +`0xb8d4` start times in 90 kHz, the first forced to 0 like the MKV parser).
+
+**Bad-interleave mode (Oppo's bug, fixed in v1.8.0).** `CLpMp4Parser::fgAllocateTableForBadInterLeaveFile` sets
+parser `+0x2991`. With it, `CLpMp4MediaManagerProxy::mrSetCfaParseRange` gives the kernel demuxer (`splitter.ko`
+CfaMp4) two parse ranges: the main one with video only (range flag `0x614` = 1) and an audio range (proxy `+0x19c8`,
+flag 2) read by a second parser instance. A subtitle range is built at proxy `+0x2388` (flag 4) but never sent (range
+count 2, no size or pointer), and the subtitle filter sits on the audio instance whose range has no subtitle part.
+The kernel log (`cliprog drv.lpdmx.cfa.mp4.d_l 9`) then shows `disable SPS` on every parse step: MP4 subtitles of
+every format (tx3g, VobSub, TTML) never reach the decoder. Dolby Vision files skip the check (parser `+0x6dc8`).
+For other files the mode is chosen by:
+- a real check: video and audio more than 3 s apart (270000 at 90 kHz) at a chunk, or the first audio chunk more than
+  0x280000 bytes from the first video chunk (0x780000 for UHD); a file with more than 199999 video and audio samples
+  is never put in the mode;
+- two blunt rules: **2 or more audio and 2 or more subtitle tracks** (the log line says so literally), and **files
+  over 512 MB with an average bit rate up to 7167999 bit/s**.
+
+The two rules caught most ordinary MP4 films. v1.8.0 skips both (the two branch sites above); the real check still
+chooses the mode. Tested: files with the only audio track stored after all the video still get the mode, exactly as
+on stock. A second audio track stored as one block at the end of the file is silent in both modes (the audio
+parser walks all audio tracks in file order), so the rules did not protect it either.
 
 ## Part 2: bdpdrv1 (profile 7)
 
