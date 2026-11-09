@@ -10,6 +10,8 @@ hdlr_sub    = 0x403f20;   /* vMP4HDLRHandle: 'subp' path (subtitle track) */
 hdlr_other  = 0x403fe8;   /* vMP4HDLRHandle: other handler types */
 stsd_drop   = 0x4291d8;   /* vMP4STSDHandle: rest of "drop this subtitle track" */
 stsd_next   = 0x428018;   /* vMP4STSDHandle: next state (the 'stpp' path goes here) */
+mrSetSpPalette = 0x4ee5e8; /* CLpMovieMpcWrapper::mrSetSpPalette(uchar*, ulong) */
+mrMPC1ProcSetSpPltInStopSt = 0x5550c8; /* MPC1 command 0x15 handler, state 0 */
 SECTIONS {
   . = 0x530de8;            /* vMPCTestDvdRwdSpeedThr, 0x9e4 bytes: moov pre-scan */
   .cave3 : { *(.text.cave3) }

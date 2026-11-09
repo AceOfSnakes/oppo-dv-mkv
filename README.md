@@ -365,12 +365,14 @@ are not.
   stream) makes them work there.
 - **MP4 files with Dolby Vision:** profile 8 (`dvvC`) plays in Dolby Vision since v1.8.0, and a single-track
   profile 7 FEL MP4 was tested too. Other MP4 variants (dual-track, profile 5) are untested.
-- **PGS subtitles in MKV after switching from a text subtitle (Oppo's bug, not caused by oppo-dv-mkv).** PGS
-  (Blu-ray picture) subtitles only appear if playback **starts** on the PGS track. When the player starts on a text
-  subtitle (SRT or ASS, for example because it is the first subtitle track) and you switch to a PGS track, nothing
-  is shown: the PGS data reaches Oppo's text subtitle decoder, which receives it but never draws it (its log says
-  "PG decoder ready" and "data consumed"). oppo-dv-mkv does not change the code that handles PGS. Files whose
-  subtitles are all PGS (typical Blu-ray remuxes) are not affected. A fix is being investigated.
+- **Switching between PGS and other subtitle types in MKV (Oppo's bug, not caused by oppo-dv-mkv; also on stock
+  firmware).** When a file is opened, the player decides once who draws its subtitles: if playback starts on a PGS
+  (Blu-ray picture) track, the PGS data goes to the player program, which draws PGS only; otherwise Oppo's subtitle
+  decoder draws text and VobSub subtitles, and a PGS track chosen later reaches a Blu-ray graphics routine that never
+  shows it. So switching from SRT, ASS or VobSub to PGS shows nothing, and switching from PGS to another type shows
+  nothing and leaves the last PGS line on screen. Stopping and playing again or seeking does not help. The track the
+  player starts on is chosen by the subtitle **language** in the player's setup, not by the track order or the default
+  flag. Files whose subtitles are all PGS (typical Blu-ray remuxes) are not affected. A fix is being investigated.
 - **MP4: at most 8 audio and 8 subtitle tracks** per file (the player's limit); the [language list](#language-list)
   chooses which.
 - **MP4 subtitles in files that are really badly interleaved** (Oppo's real interleave check still picks its special
@@ -700,6 +702,23 @@ writes it in `moov/udta`, which the parser never enters. QuickTime chapter text 
 **Fix:** `dvhook.sh` reads `moov/udta/chpl` itself and fills the parser's chapter table (up to 32 chapters, the
 first one starting at 0, as the MKV player does).
 
+### 18. MKV VobSub subtitles green or black (unreleased)
+
+**Symptom:** in MKVs with VobSub (DVD picture) subtitles and other subtitle types, a VobSub track chosen during
+playback was drawn in the wrong colours (dark green after a text subtitle). In files that also have an ASS track,
+VobSub text was black even when playback started on it. Also on stock firmware.
+
+**Cause:** the VobSub colour palette (the `palette:` line of the track's index data) was sent to the subtitle decoder
+only when playback **started** on a VobSub track, and Oppo's playback controller refused palette changes while
+playing; a track chosen later kept the previous palette. The MKV parser also keeps a single palette for the file and
+cleared it for every subtitle track with codec data, so an ASS track (whose header has no palette) listed after the
+VobSub track left an all-black palette.
+
+**Fix (`dvhook.sh`):** the parser no longer clears the palette for tracks that have none; after a switch to a VobSub
+track the palette is sent again, and the playback controller accepts it in the same states in which it accepts a
+subtitle switch, whenever Oppo's subtitle decoder is running (Oppo's handler would stop with an assertion without
+one, for example in a file that started on a PGS track).
+
 ## Tests
 
 All tests were run on one Oppo UDP-203 with the RU 65-0131 jailbreak, connected through an AV receiver to a Dolby
@@ -896,6 +915,21 @@ reads.
 | Regression suite (MKV with SRT, ASS, PGS, VobSub; MP4 with VobSub, TTML, chapters; DV MKV and MP4 files) | | ✅ 13 of 13 |
 | Installer: fresh install, updates from v1.4.0 to v1.7.1, uninstall, check only, RU, jb_overlay, CXUHD, unsupported firmware | | ✅ 66 of 66 steps |
 
+### MKV subtitle switching (unreleased)
+
+Test files: remuxes of the synthetic suite's MKV with SRT, ASS, PGS and VobSub tracks in different orders and
+languages, and VobSub-only files (one with a changed palette). The TV's own screen capture of the HDMI input showed
+the subtitles, so every result below was checked on the picture.
+
+| Test | Stock | With the fix |
+|---|---|---|
+| Start on SRT, switch to VobSub | dark green | ✅ white with black outline |
+| Start on VobSub, file also has an ASS track | black | ✅ white with black outline |
+| VobSub only / changed palette | correct / correct | ✅ unchanged |
+| SRT → VobSub → ASS → VobSub, VobSub → SRT | green, text fine | ✅ VobSub correct, text unchanged |
+| Start on SRT or VobSub, switch to PGS | nothing shown | nothing shown (known limitation) |
+| Start on PGS, switch to SRT or VobSub, back to PGS | nothing shown, last PGS line stays; PGS fine | same (known limitation), no hang |
+
 ### Final regression run (persistent install, fresh boot)
 
 | Test | Result |
@@ -997,6 +1031,12 @@ requests.
 </p>
 
 ## Changelog
+
+- **Unreleased (next version; the release waits until every subtitle format works in MKV and MP4).**
+  - **MKV VobSub subtitles in the right colours** after switching to them from another subtitle, and in files that
+    also have an ASS track (both Oppo bugs). See [fix 18](#18-mkv-vobsub-subtitles-green-or-black-unreleased).
+  - The known limitation on PGS subtitles in MKV was investigated on stock firmware and rewritten: it affects every
+    switch between PGS and another subtitle type, in both directions. See [Known limitations](#known-limitations).
 
 - **v1.8.0: MP4 files.** Part of the Dolby Vision MKV fix (`dvhook.sh`); see [MP4 files](#mp4-files-v180).
   - **Subtitles in most MP4 films:** fixed a bug in Oppo's code that hid every subtitle (any format) in MP4 files with
