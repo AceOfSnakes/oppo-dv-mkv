@@ -22,6 +22,7 @@ mk(){  # $1 = zip name, $2 = parts (any of dv, subs, menu), $3 = flag file (UNIN
     CHECKONLY) echo "Presence of this file makes install.sh only write a compatibility report (no changes)." > $T/AutoScript/CHECKONLY;;
   esac
   cp installer/README.txt $T/
+  case "$2" in *dv*) cp installer/oppo-dv-mkv-languages.txt $T/;; esac
   (cd $T && zip -qrX ../$1 .)
   rm -rf $T
 }

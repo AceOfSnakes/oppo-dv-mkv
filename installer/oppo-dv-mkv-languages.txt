@@ -1,0 +1,207 @@
+# oppo-dv-mkv: audio and subtitle languages for MP4 files
+#
+# The player can use at most 8 audio tracks and 8 subtitle tracks of a file. Most MP4 files have fewer, and then
+# this list changes nothing. When a file has more (multi-language files can carry 40 subtitle tracks), the
+# player keeps the first 8 in the file and never shows the others.
+#
+# Write your languages below, one per line, most wanted first (up to 8). The 8 tracks are then chosen like this:
+#   1. audio only: the file's default audio track always stays (it is usually the original language);
+#   2. every track in the first language of your list (normal, SDH, forced ...), then the second language, and so on;
+#   3. the slots still free are filled with the other tracks, in file order, except subtitle tracks of other
+#      languages that only have a few lines (forced-only tracks): they would slow down seeking and chapter skips.
+# The menus list the tracks in file order, not in the order of this list.
+#
+# Use the 2-letter or the 3-letter code from the table below, in upper or lower case, for example:
+#   EN
+#   PT
+# Lines starting with # are ignored. With no language listed, the player keeps its own choice (the first 8 tracks).
+# After editing, put this file next to the AutoScript folder on the USB stick and run the installer again.
+#
+# Your languages (one per line, below this comment):
+
+#
+# Codes the player's menus know:  2-letter  3-letter  language
+#   AA  AAR      Afar
+#   AB  ABK      Abkhazian
+#   AE  AVE      Avestan
+#   AF  AFR      Afrikaans
+#   AK  AKA      Akan
+#   AM  AMH      Amharic
+#   AN  ARG      Aragonese
+#   AR  ARA      Arabic
+#   AS  ASM      Assamese
+#   AV  AVA      Avaric
+#   AY  AYM      Aymara
+#   AZ  AZE      Azerbaijani
+#   BA  BAK      Bashkir
+#   BE  BEL      Belarusian
+#   BG  BUL      Bulgarian
+#   BH  BIH      Bihari
+#   BI  BIS      Bislama
+#   BM  BAM      Bambara
+#   BN  BEN      Bengali
+#   BO  BOD TIB  Tibetan
+#   BR  BRE      Breton
+#   BS  BOS      Bosnian
+#   CA  CAT      Catalan
+#   CE  CHE      Chechen
+#   CH  CHA      Chamorro
+#   CO  COS      Corsican
+#   CR  CRE      Cree
+#   CS  CES CZE  Czech
+#   CU  CHU      Church Slavic
+#   CV  CHV      Chuvash
+#   CY  CYM WEL  Welsh
+#   DA  DAN      Danish
+#   DE  DEU GER  German
+#   DV  DIV      Divehi
+#   DZ  DZO      Dzongkha
+#   EE  EWE      Ewe
+#   EL  ELL GRE  Modern Greek (1453-)
+#   EN  ENG      English
+#   EO  EPO      Esperanto
+#   ES  SPA      Spanish
+#   ET  EST      Estonian
+#   EU  BAQ EUS  Basque
+#   FA  FAS PER  Persian
+#   FF  FUL      Fulah
+#   FI  FIN      Finnish
+#   FJ  FIJ      Fijian
+#   FO  FAO      Faroese
+#   FR  FRA FRE  French
+#   FY  FRY      Western Frisian
+#   GA  GLE      Irish
+#   GD  GLA      Scottish Gaelic
+#   GL  GLG      Galician
+#   GN  GRN      Guarani
+#   GU  GUJ      Gujarati
+#   GV  GLV      Manx
+#   HA  HAU      Hausa
+#   HI  HIN      Hindi
+#   HO  HMO      Hiri Motu
+#   HR  HRV SCR  Croatian
+#   HT  HAT      Haitian
+#   HU  HUN      Hungarian
+#   HY  ARM HYE  Armenian
+#   HZ  HER      Herero
+#   IA  INA      Interlingua (International Auxiliary Language Association)
+#   ID  IND      Indonesian
+#   IE  ILE      Interlingue
+#   IG  IBO      Igbo
+#   II  III      Sichuan Yi
+#   IK  IPK      Inupiaq
+#   IO  IDO      Ido
+#   IS  ICE ISL  Icelandic
+#   IT  ITA      Italian
+#   IU  IKU      Inuktitut
+#   IW  HEB      Hebrew
+#   JA  JPN      Japanese
+#   JV  JAV      Javanese
+#   KA  GEO KAT  Georgian
+#   KG  KON      Kongo
+#   KI  KIK      Kikuyu
+#   KJ  KUA      Kuanyama
+#   KK  KAZ      Kazakh
+#   KL  KAL      Kalaallisut
+#   KM  KHM      Khmer
+#   KN  KAN      Kannada
+#   KO  KOR      Korean
+#   KR  KAU      Kanuri
+#   KS  KAS      Kashmiri
+#   KU  KUR      Kurdish
+#   KV  KOM      Komi
+#   KW  COR      Cornish
+#   KY  KIR      Kirghiz
+#   LA  LAT      Latin
+#   LB  LTZ      Luxembourgish
+#   LG  LUG      Ganda
+#   LI  LIM      Limburgan
+#   LN  LIN      Lingala
+#   LO  LAO      Lao
+#   LT  LIT      Lithuanian
+#   LU  LUB      Luba-Katanga
+#   LV  LAV      Latvian
+#   MG  MLG      Malagasy
+#   MH  MAH      Marshallese
+#   MI  MAO MRI  Maori
+#   MK  MAC MKD  Macedonian
+#   ML  MAL      Malayalam
+#   MN  MON      Mongolian
+#   MO  MOL      Moldavian
+#   MR  MAR      Marathi
+#   MS  MAY MSA  Malay (macrolanguage)
+#   MT  MLT      Maltese
+#   MY  BUR MYA  Burmese
+#   NA  NAU      Nauru
+#   NB  NOB      Norwegian Bokmål
+#   ND  NDE      North Ndebele
+#   NE  NEP      Nepali (macrolanguage)
+#   NG  NDO      Ndonga
+#   NL  DUT NLD  Dutch
+#   NN  NNO      Norwegian Nynorsk
+#   NO  NOR      Norwegian
+#   NR  NBL      South Ndebele
+#   NV  NAV      Navajo
+#   NY  NYA      Chichewa
+#   OC  OCI      Occitan (post 1500)
+#   OJ  OJI      Ojibwa
+#   OM  ORM      Oromo
+#   OR  ORI      Oriya (macrolanguage)
+#   OS  OSS      Ossetian
+#   PA  PAN      Panjabi
+#   PI  PLI      Pali
+#   PL  POL      Polish
+#   PS  PUS      Pushto
+#   PT  POR      Portuguese
+#   QU  QUE      Quechua
+#   RM  ROH      Romansh
+#   RN  RUN      Rundi
+#   RO  RON RUM  Romanian
+#   RU  RUS      Russian
+#   RW  KIN      Kinyarwanda
+#   SA  SAN      Sanskrit
+#   SC  SRD      Sardinian
+#   SD  SND      Sindhi
+#   SE  SME      Northern Sami
+#   SG  SAG      Sango
+#   SI  SIN      Sinhala
+#   SK  SLK SLO  Slovak
+#   SL  SLV      Slovenian
+#   SM  SMO      Samoan
+#   SN  SNA      Shona
+#   SO  SOM      Somali
+#   SQ  ALB SQI  Albanian
+#   SR  SCC SRP  Serbian
+#   SS  SSW      Swati
+#   ST  SOT      Southern Sotho
+#   SU  SUN      Sundanese
+#   SV  SWE      Swedish
+#   SW  SWA      Swahili (macrolanguage)
+#   TA  TAM      Tamil
+#   TE  TEL      Telugu
+#   TG  TGK      Tajik
+#   TH  THA      Thai
+#   TI  TIR      Tigrinya
+#   TK  TUK      Turkmen
+#   TL  TGL      Tagalog
+#   TN  TSN      Tswana
+#   TO  TON      Tonga (Tonga Islands)
+#   TR  TUR      Turkish
+#   TS  TSO      Tsonga
+#   TT  TAT      Tatar
+#   TW  TWI      Twi
+#   TY  TAH      Tahitian
+#   UG  UIG      Uighur
+#   UK  UKR      Ukrainian
+#   UR  URD      Urdu
+#   UZ  UZB      Uzbek
+#   VE  VEN      Venda
+#   VI  VIE      Vietnamese
+#   VO  VOL      Volapük
+#   WA  WLN      Walloon
+#   WO  WOL      Wolof
+#   YI  YID      Yiddish
+#   YO  YOR      Yoruba
+#   ZA  ZHA      Zhuang
+#   ZH  CHI ZHO  Chinese
+#   ZU  ZUL      Zulu

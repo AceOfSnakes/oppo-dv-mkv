@@ -49,3 +49,20 @@ h3_vinfo:                      @ bl mrSetStreamInfo(r0, r1={type, MPCVidElmStrmI
     pop {r0-r3, r12, lr}
     b orig_setstream
     .ltorg
+
+@ MP4: CLpMp4Parser::vMP4STSDHandle reads the Dolby Vision record only from a 'dvcC' box (profiles up to 7).
+@ Profile 8+ files carry the same 4-byte record in 'dvvC', so the player signalled DV without profile/level/RPU
+@ (purple/green picture). Each site's "cmp r3, r2" (r2 = 'dvcC') becomes "b mp4_sN"; the flags on return say
+@ "dvcC or dvvC". r2 is reloaded on every path after the sites.
+mp4_s1:
+    cmp r3, r2
+    ldrne r2, mp4_dvvc
+    cmpne r3, r2
+    b mp4_s1_ret
+mp4_s2:
+    cmp r3, r2
+    ldrne r2, mp4_dvvc
+    cmpne r3, r2
+    b mp4_s2_ret
+mp4_dvvc:
+    .word 0x43767664           @ "dvvC" as a little-endian word
