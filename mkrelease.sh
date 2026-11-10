@@ -12,7 +12,7 @@ mk(){  # $1 = zip name, $2 = parts (any of dv, subs, menu), $3 = flag file (UNIN
   cp installer/AutoScript/AutoScript.TSS $T/AutoScript/
   sed "s/@VERSION@/$V/" installer/AutoScript/install.sh > $T/AutoScript/install.sh
   cp installer/payload/bdpprog installer/payload/dvmkv.sh $P/
-  case "$2" in *dv*) cp src/liblp/build/dvhook.sh src/kernel/build/p7kel.sh src/kernel/bgfix.sh src/kernel/sarfix.sh src/kernel/hvccfix.sh src/audio/alacdec.bin $P/;; esac
+  case "$2" in *dv*) cp src/liblp/build/dvhook.sh src/kernel/build/p7kel.sh src/kernel/bgfix.sh src/kernel/sarfix.sh src/kernel/arflag.sh src/kernel/hvccfix.sh src/audio/alacdec.bin $P/;; esac
   case "$2" in *subs*) cp src/subtitles/subs.sh $P/
     for q in 09 11 18 19 20 21 22 23; do cp src/subtitles/squares/new$q.png $P/sq$q.png; done;; esac
   case "$2" in *menu*) cp src/factory-menu/fpage.sh $P/;; esac

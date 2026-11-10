@@ -34,3 +34,12 @@ H=$(od -An -v -tx1 build/sar.bin | tr -d ' \n')
 [ "$H" = "$(sed -n 's/^STUB=//p' sarfix.sh)" ] || { echo "sarfix.sh STUB does not match sar.S"; exit 1; }
 [ $(stat -c %s build/sar.bin) -le $((0x7e94d728 - 0x7e94d600)) ] || { echo "sar.S does not fit its cave"; exit 1; }
 echo "sarfix.sh stub matches sar.S"
+# arflag.sh carries its bdpdrv1 stub as hex: rebuild it from arflag.S (cave 0x7e94d680, after sar.S) and compare
+zig cc -target arm-freestanding-eabi -mcpu=cortex_a9 -marm -c arflag.S -o build/arflag.o
+ld.lld -static -Ttext=0x7e94d680 --defsym set_desc=0x7e9b0a80 -e arflag build/arflag.o -o build/arflag.elf
+llvm-objcopy -O binary -j .text build/arflag.elf build/arflag.bin
+H=$(od -An -v -tx1 build/arflag.bin | tr -d ' \n')
+[ "$H" = "$(sed -n 's/^STUB=//p' arflag.sh)" ] || { echo "arflag.sh STUB does not match arflag.S"; exit 1; }
+[ $(stat -c %s build/sar.bin) -le $((0x7e94d680 - 0x7e94d600)) ] || { echo "sar.S runs into arflag.S"; exit 1; }
+[ $(stat -c %s build/arflag.bin) -le $((0x7e94d728 - 0x7e94d680)) ] || { echo "arflag.S does not fit its cave"; exit 1; }
+echo "arflag.sh stub matches arflag.S"

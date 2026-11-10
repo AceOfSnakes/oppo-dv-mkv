@@ -15,9 +15,11 @@ The hardware is a MediaTek MT8581 (4× Cortex-A9) running Linux 3.10.
 |---|---|---|---|
 | MKV Dolby Vision signalling | `liblp.so` inside the running `bdpprog.1` (via `/proc/<pid>/mem`) | `dvhook.sh` | `src/liblp/` |
 | MP4: Dolby Vision profile 8, languages, text subtitles, chapters, language list, subtitles in "bad interleave" mode (v1.8.0) | `liblp.so` (same as above) | `dvhook.sh` | `src/liblp/`, `src/liblp/mp4/` |
+| Subtitle formats: VobSub colours and position (v1.8.1), PGS together with other formats, PGS clock (v1.9.0) | `liblp.so` (same as above) | `dvhook.sh` | `src/liblp/mp4/` (`mp4.c`, `shims.S`), sites in `src/liblp/mkinstall.py` |
 | Profile 7 decoder fixes | `bdpdrv1` kernel module (via `/dev/mem`) | `p7kel.sh` | `src/kernel/` |
 | Black letterbox bars in Dolby Vision (v1.6.0) | `bdpdrv1` kernel module (via `/dev/mem`), one instruction | `src/kernel/bgfix.sh` | none |
 | Non-square pixels stretched to 16:9 (v1.7.0) | `bdpdrv1` kernel module (via `/dev/mem`), two branches + a 30-word stub | `src/kernel/sarfix.sh` | `src/kernel/sar.S` |
+| 4:3 / 16:9 flag of SD files in Source Direct (v1.9.0) | `bdpdrv1` kernel module (via `/dev/mem`), one call + a 17-word stub | `src/kernel/arflag.sh` | `src/kernel/arflag.S` |
 | MKVs without parameter sets in the hvcC (v1.7.0) | `splitter.ko` kernel module (via `/dev/mem`), one branch + a 16-instruction stub | `src/kernel/hvccfix.sh` | `src/kernel/hvcc.S` |
 | ALAC decoder of firmware 56/60 (v1.7.0) | `/res/bdpaudec.db` (symlink swapped by the boot wrapper) | `install.sh` builds it | `src/audio/alacdec.bin` |
 | Better subtitles | running `bdpprog.1` + `liblp.so` (RU 65-0131 program) | `subs.sh` | `src/subtitles/` |
@@ -124,6 +126,106 @@ The two rules caught most ordinary MP4 films. v1.8.0 skips both (the two branch 
 chooses the mode. Tested: files with the only audio track stored after all the video still get the mode, exactly as
 on stock. A second audio track stored as one block at the end of the file is silent in both modes (the audio
 parser walks all audio tracks in file order), so the rules did not protect it either.
+
+## Part 1c: liblp.so, subtitle formats (VobSub v1.8.1, PGS v1.9.0)
+
+Same library and rules as Parts 1 and 1b, installed and switched by the same `dvhook.sh`. The code lives in a fourth
+blob at `0x53f4c4` (0x7fc bytes, over `vMPCTestOperation1`, an MPC file-playback self-test with the same callers as
+`vMPCTestOperation4`); the shared state at `0x757e80` grew to 0x128 bytes (VobSub frame sizes by track_ID, the
+`pgmix` flag at `+0xe6`). All of the bugs below are in the stock firmware.
+
+### Who draws subtitles
+
+Three parties are involved:
+- **MPC**, liblp's playback controller: a command table `_arMPC1ProcCmdInfo` (`0x724830`) of (command, pointer to 10
+  × (state, handler)); states 0 stop, 2 play, 3 pause, 4 backward, 5 backward pause, 6 preload, 8 wait pause,
+  9 wait stop. The handler pointers are relocated at load.
+- **SPS**, liblp's software subtitle decoder: draws text and VobSub on its own graphics plane
+  (`mrSpsEnableScreen` `0x57e790`) and, for format 12 (PGS), drives the player program's Blu-ray PG decoder through
+  `TSFile_*` imports (`TsFile_Init/Start/DisplayEnable`, `TSFile_ConsumeData`, `TSFile_TimeExpired`).
+- **The player program** (`bdpprog.1`): owns that PG decoder and, in "SP callback" mode, a parser of its own for MKV
+  PGS (`pb_parse_sp_mkv_pgs`).
+
+For an MKV the player program always asks for `PB_SP_USE_CALLBACK_FOR_PGS`. At file open
+(`CLpMkvMediaManagerProxy::mrMkvSetFileInf`), if the start track is PGS, liblp sets the MPC flag `fgSupportSpFilter`
+(ctx `+0x30a8c`): `mrMPC1ProcSetMMedInfCmdInStopSt` then allocates an MPC subtitle stream instead of creating an SPS
+(`fgMPCSpInit` `0x520924`, SPS id at ctx `+0x309b4`), and PGS packets go to the player program by callback
+(`[MPC] SP DATA AVAILABLE` → `<MKV_PGS>PBMG_SP`). Otherwise an SPS is created. The choice is made once, in the stop
+state. The start track is chosen by the subtitle language of the player's setup, not by track order or default flag.
+
+### VobSub palette in MKV (v1.8.1)
+
+| Site | Stock | Patched | Purpose |
+|---|---|---|---|
+| `0x3bf444` | `bl x_memset` | `nop` | `CLpMkvParser::mrGetVobSubInf` (`0x3bf424`) runs for every subtitle track with CodecPrivate and first clears the file's single palette slot (parser `+0x2e18`, 0x4c bytes; 16 × 4 palette at `+0x2e24`): an ASS track listed after a VobSub track left an all-black palette |
+| `0x3e1128` | `cmp r0, #0` | `bl v_vobsw` | in `mrChangeSpStNo` (`0x3e05a8`), after `mrChangeStreamInfo`: if the new track is internal and format 7 (VobSub), send its palette again with `CLpMovieMpcWrapper::mrSetSpPalette` (`0x4ee5e8`, MPC command 0x15). Stock sends it only from `mrMkvSetSpStreamInf`, at open, when the start track is VobSub: a track chosen later kept the old palette (dark green after text) |
+| `.data 0x7256b0` + 8k + 4, states 1 to 5, 8, 9 | 0 | `v_pltst` | MPC accepted command 0x15 only in state 0 (`mrMPC1ProcSetSpPltInStopSt` `0x5550c8` → `fgMPCSpSetPlt` → SPS command 0x107) and answered `0xa1000107` while playing. The new entries go through a guard to the same handler; the guard returns without calling it when no SPS exists (SPS id `-1` and ctx `+0x30a75` = 0), where the stock handler asserts |
+
+Data words whose stock value is 0 are a separate list in `dvhook.sh` (`ZSITES`): "0" is also what a not yet relocated
+word looks like, so they are written last and restored to 0.
+
+### VobSub frame size in MP4 (v1.8.1, v1.9.0)
+
+The MP4 path gives the SPS VobSub stream records with width and height 0 and mode 2, and the SPS then assumes a
+720x576 frame; a 720x480 track is drawn at 5/6 of its height on screen. The size is only in the track header.
+`.data 0x6ee354` (MP4 box dispatch table, `tkhd`) points to `m_tkhd`, which reads the box from the file and keeps
+width and height; the `hdlr` hook stores them for `subp` tracks by track_ID; `m_gsi` (the `mrGetStreamInfo` hook of
+Part 1b) sets the VobSub records (format 1) `r[7]`/`r[8]` to the size and `r[3]` to 1 (up to 480 lines) or 2, as
+`CLpMkvParser::vGetSpStrmInf` does for MKV. Since v1.9.0 it does so on **every** call: the parser rewrites the mode
+(not the size) later, and v1.8.1 only acted when the size differed, so the subtitles could go back to the 576-line
+view. The palette is read by Oppo's code from the `esds` as the binary 16 × 4 YCbCr table MP4Box writes; ffmpeg
+stores `.idx` text there, which gives wrong colours (a known limitation).
+
+### PGS after a switch: PES packets (v1.9.0)
+
+After a switch to a PGS track with an SPS running, `mrSpsScmdSpFormat` (`0x574d20`) goes to format 12 and
+`mrSpsGetAuTblData` hands every packet to `TSFile_ConsumeData` (`0x582bc4`). The PG decoder parses a packet as one
+MPEG PES packet (`00 00 01 BD`, header with PTS and DTS) holding **one** PGS segment, as a transport stream delivers
+it. A Matroska block is a whole display set of bare segments (type, 16-bit length, data; no `PG` magic, no time
+stamps), so nothing parsed: "segment ignored; is not a PCS".
+
+| Site | Stock | Patched | Purpose |
+|---|---|---|---|
+| `0x582bc4` | `bl TSFile_ConsumeData` | `bl p_feed` | `pg_feed`: if the packet does not start with a PES start code, copy the block, split it at the segment lengths and give the decoder one packet per segment: a 19-byte PES header (stream id `0xBD`, PTS = DTS = the block's 90 kHz time from packet `+0x18`) chained to the segment as a second fragment (the decoder walks fragment lists). Two heap blocks (`x_mem_alloc`) per display set |
+| `0x58abdc` | `push {r4-r6, lr}` | `b p_done` | first instruction of `SpsTsPgDataConsumedCb`: for one of our packets (magic) count down and return; with the last one free the two blocks and continue with the **real** packet, so the SPS releases it exactly once. Other packets pass through |
+
+A transport stream's own PES packets are recognised by their start code and passed on unchanged.
+
+### PGS as the start track with other formats in the file (v1.9.0)
+
+| Site | Stock | Patched | Purpose |
+|---|---|---|---|
+| `0x3d2370` | `mov r1, #1` | `bl p_mode` | `mrMkvSetFileInf`, start track is PGS: stock selects the callback mode (no SPS). `pg_mode` returns 0 (create the SPS, like any other start track) when the file has a subtitle track of another format (`vGetSpStrmInf` format ≠ 0xc for any of the proxy's `+0x125` tracks) or external subtitles (`u4GetExtSpCount`), and records that in `pgmix`; a PGS-only file returns 1 and keeps the stock path |
+| `0x57e36c` | `bne 0x57e380` | `b p_scr` | `mrSpsInitScreenPlane`: stock opens no screen plane when the SPS starts in format 12 (it was written for transport streams), so nothing could be shown, not even text after a switch. With `pgmix` the plane is opened |
+| `0x3e0a40` | `b 0x3e07e8` | `b p_same` | `mrChangeSpStNo`: "the same track is set again, it is track 1 and PGS" does a full stream change in stock. The player program sets the start subtitle again after every start and seek; with the SPS in use that restarted the PG decoder and lost the display sets it already held (several seconds of subtitles). With `pgmix` it is treated like any other track |
+
+Everything here is gated on `pgmix`, which `pg_mode` sets at each MKV open and the MP4 open clears.
+
+### PG decoder clock (v1.9.0)
+
+The player program's PG decoder counts in 45 kHz: it halves the PES time stamps, and `TsSpDecoderProxy::SetAtTime`
+doubles its timers again for the SPS. But `mrTsSpsDecoder` (`0x58afa0`) calls `TSFile_TimeExpired(when, now)` with
+both values in 90 kHz and the proxy passes them on as they are, so after the first timer the decoder believes it is
+twice as far into the film: every display set is due on arrival, and its clear follows at once. `mrSpsDcmdPlay`
+calls `TSFile_Start(STC)` with the clock from before a seek, which made the read-ahead burst after a seek show and
+clear a line immediately. Stock never showed any of this, because this path drew nothing for MKV.
+
+| Site | Stock | Patched | Purpose |
+|---|---|---|---|
+| `0x58affc` | `bl TSFile_TimeExpired` | `bl p_texp` | halve `when` (r0:r1) and `now` (r2:r3), then tail-call |
+| `0x573908` | `bl TSFile_Start` | `bl p_start` | start the PG decoder's clock at 0, so every display set gets a timer and only the per-set check decides |
+
+These two sites are not gated: they are only reached when an SPS feeds the PG decoder. For transport-stream PGS the
+test file behaved the same before and after (PGS from about 20 s after the start, as on stock).
+
+**What is left.** A seek into the middle of a line does not show that line (the display set is before the seek
+point); the line after it is on time.
+
+**Testing.** An offline simulation (an ARM emulator running the stubs against the library image) covers every stub: `v_vobsw`, `v_pltst`,
+`m_tkhd`, `pg_feed`/`pg_done` (packet layout, counts, release of the real packet, pass-through of PES input),
+`pg_mode`, `p_same`, `p_scr`, `p_texp`, `p_start`: 84 checks. On the player, a console log with every debug module
+of the player program on shows the PG decoder's own messages; the pictures were checked with the TV's screen
+capture of the HDMI input.
 
 ## Part 2: bdpdrv1 (profile 7)
 
@@ -497,6 +599,44 @@ no site redirected (an interrupted `on` or `off`) is reported as `partial` or `o
 Workaround without the patch: set the stream's SAR to 1:1, for example `ffmpeg -i in.mkv -map 0:v:0 -c copy -bsf:v
 hevc_mp4toannexb,hevc_metadata=sample_aspect_ratio=1/1 video.hevc`, then mux it again with mkvmerge (Dolby Vision
 and HDR10+ metadata stay in the stream).
+
+## Part 2c-2: bdpdrv1 (4:3 / 16:9 flag of SD files in Source Direct, `arflag.sh`, v1.9.0)
+
+Addresses are bdpdrv1 virtual addresses (module at `0x7e8d3000`).
+
+`VDP_DecideSrcOutRegion` (`0x7e9b0f34`) ends its aspect handling at `0x7e9b1e2c` with
+`bl VDP_SetAspectRatioDescription` (`0x7e9b0a80`): r0 = the picture's aspect code (frame header `+0xe8`, the
+`SRC_ASP_*` names in `strSrcAspMsg`: 0 unknown, 1 1:1, 2 4:3 full, 3..8 letterbox kinds, 9 16:9 full, 10 2.21:1,
+11 16:9 pan-scan, 12 undefined, 13 customized = ratio from the container), r1 = the TV aspect mode from
+`VDP_GetPMXTvAspectRatio`. The function indexes two tables with (mode section x 14 + code), sections for modes 2, 3,
+5 and "other": `TVE_ASP_MATRIX` (analogue WSS) and a table of (HDMI picture aspect, AFD) pairs at the address in its
+literal pool (`0x7e9b0f00`) `+0x30`. It stores the pair in `_u1HDMIPar` / `_u1HDMIAfd` and calls `vVdpSetAspectRatio`
+(`0x7eb85f30`), which sends the AVD command behind the AVI InfoFrame when the pair changes. Picture aspect 0 = 4:3,
+1 = 16:9.
+
+With Source Direct and SD output the mode is 3 for 4:3 MKVs and for every H.264/HEVC file in TS or MP4 (6 for 16:9
+MKVs), and the picture is sent unscaled (`FIX ASP` log: output window = the whole 720x576 or 720x480 frame). The mode
+3 section says 4:3 for codes 0 to 8 and 16:9 for codes 9 to 13. H.264 in MKV arrives with code 13 whatever the
+container ratio is (log `[H264] : IBCAsp[0], MWAsp[13], CodecAsp[0], CurrAsp[13]`), so 4:3 is flagged 16:9. H.264 and
+HEVC from TS and MP4, and HEVC from MKV, arrive with code 0, so 16:9 is flagged 4:3. MPEG-2 gives 2 or 9 from its
+sequence header. With a scaled output (1080p, 2160p) the mode was 6 in every test, the "other" section, where every
+code gives 16:9: the picture is scaled into a 16:9 frame, with bars when it is 4:3.
+
+The patch: site `0x7e9b1e2c` (`13fbffeb` → `136efeeb`) calls the stub in `arflag.S` at `0x7e94d680`, behind
+`sar.S` in the same unused function tail (`sar.S` ends at `0x7e94d678`, the function at `0x7e94d728`). For r1 = 3
+and r0 = 0, 1 or 13 it reads the source shape at VDP path `+0x698`/`+0x69c` (r4 holds the path all through
+`VDP_DecideSrcOutRegion`; the same pair as the `Src AR` log, kept small by `sarfix.sh`), and sets r0 = 0 when
+2w < 3h, else 13; a zero in the pair leaves r0 alone. Then it branches to `VDP_SetAspectRatioDescription`, which
+returns to the caller. Only r2 and r3 are used.
+
+`arflag.sh` checks the code that reads the shape through r4 (24 bytes at `0x7e9b1d30`), the call with its arguments
+(32 bytes before and 8 after the site), the first 16 bytes of the called function, the three table entries the stub
+relies on (mode 3: codes 0 and 1 → 0, code 13 → 1; the table address moves between builds, the values do not), the
+site word and the cave's 17 original words; `off` restores them. The cave is written first, then the site.
+`build.sh` assembles `arflag.S`, checks it against the hex in `arflag.sh`, and checks that both stubs fit.
+
+Debugging: VDP log flags as in Part 2c show `TV ASP`, `Src Asp`, `Src AR` and `FIX ASP`; `_u1HDMIPar` /
+`_u1HDMIAfd` are at `0x7ed2ce58` / `0x7ed2ce59` in the RU build.
 
 ## Part 2d: audio DSP decoders (`bdpaudec.db`, v1.7.0)
 
