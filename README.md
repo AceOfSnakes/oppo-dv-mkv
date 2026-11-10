@@ -139,7 +139,7 @@ in the same `liblp.so` patch), so they come with the `full`, `mkv-subtitles` and
 | Text subtitles (`tx3g`, what ffmpeg calls `mov_text`; written by ffmpeg, HandBrake and most MP4 tools) | not listed, never shown | **shown**, with the right timing |
 | Chapters (Nero `chpl`, stored in `moov/udta` by every muxer) | ignored, no chapter skips | **chapters and chapter skips** |
 | More than 8 audio or 8 subtitle tracks | the first 8 of each in the file | **your languages first** ([language list](#language-list)) |
-| VobSub (DVD picture) subtitles from a 720x480 (NTSC) DVD | drawn too high | **in place** (unreleased, [fix 19](#19-mp4-vobsub-subtitles-too-high-unreleased)) |
+| VobSub (DVD picture) subtitles from a 720x480 (NTSC) DVD | drawn too high | **in place** (v1.8.1, [fix 19](#19-mp4-vobsub-subtitles-too-high-v181)) |
 | **Subtitles in most ordinary MP4 films** (any subtitle format) | **never shown** (Oppo's bug, see below) | **shown** |
 
 **Oppo's bug: MP4 subtitles that never appear.** The player has a special reading mode for MP4 files whose audio and
@@ -345,8 +345,9 @@ are not.
   say **`UNINSTALLED`**. After the next power cycle the player behaves as before the install.
 - **Built-in fail-safes:** the boot wrapper switches the patches off by itself and boots a stock player:
   - if two boots in a row never reach a healthy state, which the patcher marks 90 seconds after start, the next boot
-    runs without patches and the one after it tries them again (so switching the player off twice within 90 seconds
-    of power-on does not switch them off for good; `wrapper.log` says `patches skipped for this boot`); or
+    runs without patches and the one after it tries them again (`wrapper.log` says `patches skipped for this boot`).
+    Since v1.8.1 a normal power off, restart or firmware update also counts as healthy, so only boots that end without
+    the player exiting (a hang, or the power cord pulled within 90 seconds) count; or
   - if the player program crashes within 120 seconds of a patched start. In this case it reboots once with the
     patches disabled.
 - Logs on the player: `/mnt/ubi_boot/oppo-dv-mkv/dvmkv.log` and `wrapper.log`.
@@ -706,7 +707,7 @@ writes it in `moov/udta`, which the parser never enters. QuickTime chapter text 
 **Fix:** `dvhook.sh` reads `moov/udta/chpl` itself and fills the parser's chapter table (up to 32 chapters, the
 first one starting at 0, as the MKV player does).
 
-### 18. MKV VobSub subtitles green or black (unreleased)
+### 18. MKV VobSub subtitles green or black (v1.8.1)
 
 **Symptom:** in MKVs with VobSub (DVD picture) subtitles and other subtitle types, a VobSub track chosen during
 playback was drawn in the wrong colours (dark green after a text subtitle). In files that also have an ASS track,
@@ -723,7 +724,7 @@ track the palette is sent again, and the playback controller accepts it in the s
 subtitle switch, whenever Oppo's subtitle decoder is running (Oppo's handler would stop with an assertion without
 one, for example in a file that started on a PGS track).
 
-### 19. MP4 VobSub subtitles too high (unreleased)
+### 19. MP4 VobSub subtitles too high (v1.8.1)
 
 **Symptom:** VobSub subtitles in MP4 files from NTSC DVDs (720x480) appeared well above their place, at about four
 fifths of the screen height. Also on stock firmware.
@@ -932,7 +933,7 @@ reads.
 | Regression suite (MKV with SRT, ASS, PGS, VobSub; MP4 with VobSub, TTML, chapters; DV MKV and MP4 files) | | ✅ 13 of 13 |
 | Installer: fresh install, updates from v1.4.0 to v1.7.1, uninstall, check only, RU, jb_overlay, CXUHD, unsupported firmware | | ✅ 66 of 66 steps |
 
-### MKV subtitle switching and MP4 VobSub (unreleased)
+### MKV subtitle switching and MP4 VobSub (v1.8.1)
 
 Test files: remuxes of the synthetic suite's MKV with SRT, ASS, PGS and VobSub tracks in different orders and
 languages, VobSub-only files (one with a changed palette), and 720x480 VobSub tracks in an MKV and in an MP4 made with
@@ -950,6 +951,20 @@ the subtitles, so every result below was checked on the picture.
 | MP4 (MP4Box), two 720x480 VobSub tracks: start, switch, switch back | too high | ✅ in place (same height as the MKV) |
 | Same tracks in an MKV | in place | ✅ unchanged |
 | Regression: synthetic suite (MKV and MP4 subtitles, tracks, chapters, seeks), DV P7 FEL MKV and MP4, P8.1 MP4, P5 MKV | | ✅ all pass |
+
+### Boot fixes (v1.8.1)
+
+Offline, in a simulator of the running player and of the boot wrapper (the race depends on boot timing).
+
+| Test | v1.8.0 | v1.8.1 |
+|---|---|---|
+| `dvhook.sh on` while `liblp.so` is loaded but not yet relocated (its data words as in the file), relocated 2.5 s later | refused (`site 0x6ee3a4 has unexpected 00000000`), DV MKV fix off | ✅ waits, then on |
+| ... relocated, but one data word changed by something else | refused | ✅ still refused, nothing written |
+| ... never relocated | refused | ✅ gives up after 60 s, nothing written |
+| Boot wrapper: boot cut short (power cord) twice, then a boot | next boot without patches, then patches again | ✅ unchanged |
+| Boot wrapper: player switched off (exit 2) or restarted (exit 3) after a boot cut short | boot counter kept | ✅ counter cleared |
+| Boot wrapper: player crash within 120 s of a patched start | patches disabled, reboot | ✅ unchanged |
+| Installer: every scenario (regions, jb_overlay, CXUHD, updates from v1.4.0 to v1.8.0 and back, uninstall, check) | | ✅ 75/75 |
 
 ### Final regression run (persistent install, fresh boot)
 
@@ -1053,11 +1068,20 @@ requests.
 
 ## Changelog
 
-- **Unreleased (next version; the release waits until every subtitle format works in MKV and MP4).**
+- **v1.8.1: VobSub subtitles, and two fixes for v1.8.0.**
+  - **Dolby Vision MKV fix not switched on at boot on some players** (v1.8.0 bug; `dvmkv.log` showed
+    `dvhook: site 0x6ee3a4 has unexpected 00000000` and `dvhook is not on`, while `dvhook.sh on` by hand worked).
+    Since v1.8.0 `dvhook.sh` also changes some data words of `liblp.so` (MP4 tables). At boot it could check them
+    before the system's dynamic linker had finished loading `liblp.so` (relocation, which fills these words in), take
+    the not-yet-filled words for another mod's changes and refuse, which left the whole Dolby Vision MKV fix off. It
+    now waits for the relocation (at most 60 s). Nothing was ever patched wrongly: the check refused before writing.
+  - **Fail-safe:** a normal power off, restart or update now counts as a healthy boot. Before, switching the player
+    off normally within 90 seconds of power-on counted like a hang, and two such boots in a row made the next boot
+    run without patches.
   - **MKV VobSub subtitles in the right colours** after switching to them from another subtitle, and in files that
-    also have an ASS track (both Oppo bugs). See [fix 18](#18-mkv-vobsub-subtitles-green-or-black-unreleased).
+    also have an ASS track (both Oppo bugs). See [fix 18](#18-mkv-vobsub-subtitles-green-or-black-v181).
   - **MP4 VobSub subtitles from NTSC DVDs in their place** instead of too high (Oppo bug). See
-    [fix 19](#19-mp4-vobsub-subtitles-too-high-unreleased).
+    [fix 19](#19-mp4-vobsub-subtitles-too-high-v181).
   - The known limitation on PGS subtitles in MKV was investigated on stock firmware and rewritten: it affects every
     switch between PGS and another subtitle type, in both directions. See [Known limitations](#known-limitations).
 

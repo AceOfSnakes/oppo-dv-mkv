@@ -7,8 +7,9 @@
 # copy of the player).
 # Fail-safes (each one leaves a stock player):
 #  - $D/disable exists                                          -> no patches
-#  - 2 boots in a row never reached "healthy" (dvmkv.sh clears $D/bootcount after 90 s) -> no patches for one boot,
-#    then they are tried again (two short boots, e.g. switched off within 90 s, must not disable them for good)
+#  - 2 boots in a row never reached "healthy" (dvmkv.sh clears $D/bootcount after 90 s, and this wrapper when the
+#    player exits normally: switched off, restarted or updated) -> no patches for one boot, then they are tried again
+#    (two boots cut short, e.g. by unplugging within 90 s, must not disable them for good)
 #  - player dies abnormally within 120 s of a patched start     -> create $D/disable and reboot
 D=${OPPODV_D:-/mnt/ubi_boot/oppo-dv-mkv}
 PLAYER=${OPPODV_PLAYER:-/usr/local/bin/bdpprog.1}
@@ -44,7 +45,7 @@ $PLAYER "$@"
 RC=$?
 T1=$(cut -d. -f1 /proc/uptime)
 case "$RC" in
-  0|2|3|4|5|6|7|9|11) ;;
+  0|2|3|4|5|6|7|9|11) [ $MODS = 1 ] && rm -f $D/bootcount && sync;;   # a normal exit: this boot did not hang
   *) if [ $MODS = 1 ] && [ $((T1-T0)) -lt 120 ]; then
        touch $D/disable
        echo "boot $(date) player rc=$RC after $((T1-T0))s -> patches disabled, rebooting" >> $D/wrapper.log

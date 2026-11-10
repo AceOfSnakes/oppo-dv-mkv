@@ -67,6 +67,10 @@ data = [(0x6ee3a4, [0x402628], syms2['m_moov']),             # MP4 box dispatch 
 # v_pltst: the stock handler mrMPC1ProcSetSpPltInStopSt, except when there is no SPS decoder (it would assert).
 # _arMPC1ProcCmdInfo: cmd 0x15 -> 10 x (state, handler) at 0x7256b0.
 zdata = [(0x7256b0 + 8 * k + 4, syms2['v_pltst']) for k in (1, 2, 3, 4, 5, 8, 9)]
+# relocation done? that GOT slot holds the file's unrelocated .plt address (its lazy value minus the base) until then
+RELOC_VA = 0x6e25c0
+RELOC_RAW = struct.pack('<I', [o for va, o, n in data if va == RELOC_VA][0][-1]).hex()
+assert RELOC_RAW == '64ac1400'
 rows = [(va, o.hex(), n.hex(), hx(o), hx(n)) for va, o, n in code]
 
 out = f'''#!/bin/sh
@@ -84,6 +88,13 @@ rd(){{ dd if=$M bs=1 skip=$1 count=$2 2>/dev/null | hexdump -v -e "$2/1 \\"%02x\
 w4(){{ printf "$2" | dd of=$M bs=4 seek=$(( $1 / 4 )) conv=notrunc 2>/dev/null; }}
 le(){{ printf '%02x%02x%02x%02x' $(($1 & 255)) $(($1 >> 8 & 255)) $(($1 >> 16 & 255)) $(($1 >> 24 & 255)); }}
 wv(){{ w4 $1 "$(printf '\\\\x%02x\\\\x%02x\\\\x%02x\\\\x%02x' $(($2 & 255)) $(($2 >> 8 & 255)) $(($2 >> 16 & 255)) $(($2 >> 24 & 255)))"; }}
+# At boot liblp.so is in the player's maps as soon as the dynamic linker has mapped it, but its data words are relocated
+# a moment later (the MP4 box table words read 0 until then). Wait for that (at most 60 s) instead of taking the
+# unrelocated words for another mod's changes: the GOT slot {RELOC_VA:#x} keeps the file's unrelocated .plt address
+# until liblp's relocations are done (the .plt relocations come after all the others).
+n=0; while [ "$(rd $((B + {RELOC_VA:#x})) 4)" = {RELOC_RAW} ]; do
+  n=$((n + 1)); [ $n -gt 60 ] && {{ echo "liblp.so still not relocated after 60 s"; exit 1; }}; sleep 1; done
+[ $n -gt 0 ] && echo "waited $n s for the player to finish loading liblp.so"
 SITES="{' '.join(f'{r[0]:#x}:{r[1]}:{r[2]}' for r in rows)}"
 DSITES="{' '.join(f'{va:#x}:{",".join(f"{o:#x}" for o in origs)}:{new:#x}' for va, origs, new in data)}"
 ZSITES="{' '.join(f'{va:#x}:{new:#x}' for va, new in zdata)}"

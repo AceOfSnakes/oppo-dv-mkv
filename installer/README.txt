@@ -50,6 +50,6 @@ INSTALL
 
 UNINSTALL
   Use the oppo-dv-mkv-*-uninstall.zip release the same way (log ends with "UNINSTALLED").
-  Emergency off switch: after two boots in a row that never reached the healthy mark (90 s after power-on) the
-  boot wrapper skips the patches for one boot, then tries them again; after a crash of the player shortly after a
-  patched start it disables them until the next install.
+  Emergency off switch: after two boots in a row that never reached the healthy mark (90 s after power-on, or a
+  normal power off / restart before that) the boot wrapper skips the patches for one boot, then tries them again;
+  after a crash of the player shortly after a patched start it disables them until the next install.
