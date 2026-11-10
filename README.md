@@ -139,6 +139,7 @@ in the same `liblp.so` patch), so they come with the `full`, `mkv-subtitles` and
 | Text subtitles (`tx3g`, what ffmpeg calls `mov_text`; written by ffmpeg, HandBrake and most MP4 tools) | not listed, never shown | **shown**, with the right timing |
 | Chapters (Nero `chpl`, stored in `moov/udta` by every muxer) | ignored, no chapter skips | **chapters and chapter skips** |
 | More than 8 audio or 8 subtitle tracks | the first 8 of each in the file | **your languages first** ([language list](#language-list)) |
+| VobSub (DVD picture) subtitles from a 720x480 (NTSC) DVD | drawn too high | **in place** (unreleased, [fix 19](#19-mp4-vobsub-subtitles-too-high-unreleased)) |
 | **Subtitles in most ordinary MP4 films** (any subtitle format) | **never shown** (Oppo's bug, see below) | **shown** |
 
 **Oppo's bug: MP4 subtitles that never appear.** The player has a special reading mode for MP4 files whose audio and
@@ -373,6 +374,9 @@ are not.
   nothing and leaves the last PGS line on screen. Stopping and playing again or seeking does not help. The track the
   player starts on is chosen by the subtitle **language** in the player's setup, not by the track order or the default
   flag. Files whose subtitles are all PGS (typical Blu-ray remuxes) are not affected. A fix is being investigated.
+- **MP4 VobSub tracks written by ffmpeg** show wrong colours (or nothing, when ffmpeg copied a high-resolution bitmap
+  track): ffmpeg stores the palette as text, where MP4 players expect the binary palette that MP4Box and HandBrake
+  write. Put VobSub subtitles in an MKV, or mux the MP4 with MP4Box.
 - **MP4: at most 8 audio and 8 subtitle tracks** per file (the player's limit); the [language list](#language-list)
   chooses which.
 - **MP4 subtitles in files that are really badly interleaved** (Oppo's real interleave check still picks its special
@@ -719,6 +723,19 @@ track the palette is sent again, and the playback controller accepts it in the s
 subtitle switch, whenever Oppo's subtitle decoder is running (Oppo's handler would stop with an assertion without
 one, for example in a file that started on a PGS track).
 
+### 19. MP4 VobSub subtitles too high (unreleased)
+
+**Symptom:** VobSub subtitles in MP4 files from NTSC DVDs (720x480) appeared well above their place, at about four
+fifths of the screen height. Also on stock firmware.
+
+**Cause:** the MP4 player never told the subtitle decoder the subtitle frame size, which only the track header
+(`tkhd`) holds; the decoder then assumed a 720x576 (PAL) DVD frame. The MKV player passes the size from the track's
+index data.
+
+**Fix (`dvhook.sh`):** the size of every VobSub track's header is read when the file is opened and passed to the
+decoder, with the 480/576-line mode, the way the MKV player does it. PAL (720x576) files were already right and are
+unchanged.
+
 ## Tests
 
 All tests were run on one Oppo UDP-203 with the RU 65-0131 jailbreak, connected through an AV receiver to a Dolby
@@ -915,10 +932,11 @@ reads.
 | Regression suite (MKV with SRT, ASS, PGS, VobSub; MP4 with VobSub, TTML, chapters; DV MKV and MP4 files) | | ✅ 13 of 13 |
 | Installer: fresh install, updates from v1.4.0 to v1.7.1, uninstall, check only, RU, jb_overlay, CXUHD, unsupported firmware | | ✅ 66 of 66 steps |
 
-### MKV subtitle switching (unreleased)
+### MKV subtitle switching and MP4 VobSub (unreleased)
 
 Test files: remuxes of the synthetic suite's MKV with SRT, ASS, PGS and VobSub tracks in different orders and
-languages, and VobSub-only files (one with a changed palette). The TV's own screen capture of the HDMI input showed
+languages, VobSub-only files (one with a changed palette), and 720x480 VobSub tracks in an MKV and in an MP4 made with
+MP4Box. The TV's own screen capture of the HDMI input showed
 the subtitles, so every result below was checked on the picture.
 
 | Test | Stock | With the fix |
@@ -929,6 +947,9 @@ the subtitles, so every result below was checked on the picture.
 | SRT → VobSub → ASS → VobSub, VobSub → SRT | green, text fine | ✅ VobSub correct, text unchanged |
 | Start on SRT or VobSub, switch to PGS | nothing shown | nothing shown (known limitation) |
 | Start on PGS, switch to SRT or VobSub, back to PGS | nothing shown, last PGS line stays; PGS fine | same (known limitation), no hang |
+| MP4 (MP4Box), two 720x480 VobSub tracks: start, switch, switch back | too high | ✅ in place (same height as the MKV) |
+| Same tracks in an MKV | in place | ✅ unchanged |
+| Regression: synthetic suite (MKV and MP4 subtitles, tracks, chapters, seeks), DV P7 FEL MKV and MP4, P8.1 MP4, P5 MKV | | ✅ all pass |
 
 ### Final regression run (persistent install, fresh boot)
 
@@ -1035,6 +1056,8 @@ requests.
 - **Unreleased (next version; the release waits until every subtitle format works in MKV and MP4).**
   - **MKV VobSub subtitles in the right colours** after switching to them from another subtitle, and in files that
     also have an ASS track (both Oppo bugs). See [fix 18](#18-mkv-vobsub-subtitles-green-or-black-unreleased).
+  - **MP4 VobSub subtitles from NTSC DVDs in their place** instead of too high (Oppo bug). See
+    [fix 19](#19-mp4-vobsub-subtitles-too-high-unreleased).
   - The known limitation on PGS subtitles in MKV was investigated on stock firmware and rewritten: it affects every
     switch between PGS and another subtitle type, in both directions. See [Known limitations](#known-limitations).
 

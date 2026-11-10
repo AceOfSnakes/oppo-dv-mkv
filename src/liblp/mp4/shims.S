@@ -35,6 +35,15 @@ m_hdlrbox:                     @ box handler for hdlr (r0 = parser, r2:r3 = u64,
     bxeq lr                    @ not handled: the track stays of unknown type and is ignored
     b orig_hdlr
 
+m_tkhd:                        @ box handler for tkhd (r0 = parser, r2:r3 = u64, [sp] = box)
+    push {r0-r3, r12, lr}
+    GETBASE
+    mov r2, r1
+    ldr r1, [sp, #24]          @ box
+    bl mp4_tkhd                @ (parser, box, base)
+    pop {r0-r3, r12, lr}
+    b orig_tkhd
+
 m_mdhd:                        @ box handler (r0 = parser, r2:r3 = u64, [sp] = box)
     push {r0-r3, r12, lr}
     GETBASE
@@ -103,6 +112,9 @@ m_srt:                         @ mrSpsDecTextStringByFormat: bl mrSpsDecStringBy
     mov r0, r12
     bx lr
 
+    .ltorg
+
+    .section .text.cave4,"ax"
 @ MKV VobSub palette on a subtitle switch (Oppo bug: the palette reached the decoder only when playback started on the
 @ VobSub track, so a VobSub track chosen later kept the previous palette, e.g. green). Replaces "cmp r0, #0" right after
 @ CLpMovieMpcWrapper::mrChangeStreamInfo in CLpMkvMediaManagerProxy::mrChangeSpStNo (0x3e1128). On the internal-track

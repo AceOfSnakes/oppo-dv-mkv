@@ -17,6 +17,7 @@
  *    parser's Nero chapter table as vMP4NEROCHAPHandle does; the first chapter starts at 0, as the MKV parser does. */
 typedef unsigned char u8; typedef unsigned short u16; typedef unsigned int u32; typedef unsigned long long u64;
 #define CAVE3 __attribute__((section(".text.cave3"), noinline))   /* moov pre-scan: in vMPCTestDvdRwdSpeedThr (link.ld) */
+#define CAVE4 __attribute__((section(".text.cave4"), noinline))   /* subtitle fixes: in vMPCTestOperation1 (link.ld) */
 #include "iso639.h"
 
 #define ST_VA       0x757e80u   /* RW bss slack after dvhook's state (0x757e00..0x757e44) */
@@ -49,6 +50,7 @@ typedef unsigned char u8; typedef unsigned short u16; typedef unsigned int u32; 
 #define MAXREADS    2000        /* pre-scan read budget */
 #define SPARSE      30          /* subtitle track with < 1 sample per SPARSE seconds = 'sparse' (see the selection) */
 #define FMT_TEXT    9           /* MPC subtitle format: UTF-8 text (MKV S_TEXT/UTF8) */
+#define FMT_DVDSP   1           /* MPC subtitle format of MP4 VobSub ('mp4s') tracks */
 #define FCC(a,b,c,d) ((u32)(a) << 24 | (u32)(b) << 16 | (u32)(c) << 8 | (u32)(d))
 
 struct st {
@@ -60,6 +62,9 @@ struct st {
     u32 skip[2];     /* track_IDs the pre-scan left out (bit per ID) */
     u32 hits[8];     /* moov, mdhd, lang calls, tx3g, gsi fixes, lang msgs, text strips, queued line ends */
     u32 scan[4];     /* last pre-scan: reads, tracks, audio candidates << 16 | subtitle candidates, skipped */
+    u8 tk_tid, nsd;  /* last tkhd's track_ID; VobSub frame sizes kept in sd[] */
+    u16 tk_w, tk_h, rsv;   /* last tkhd's width and height (integer pixels) */
+    struct { u8 tid, rsv; u16 w, h, rsv2; } sd[SLOTS];   /* 'subp' (VobSub) tracks: frame size from their tkhd */
 };
 #define ST(base) ((volatile struct st *)((base) + ST_VA))
 
@@ -176,10 +181,27 @@ static CAVE3 u32 pref_a2(volatile struct st *s, u32 i, u32 base) {   /* list ent
 
 /* moov box (b = the parser's first bytes of it): a new file (or a re-parse) starts. Forget the previous one, and when
  * a language list is set, decide which audio/subtitle tracks the parser keeps. */
+/* tkhd box (b = its first 0x28 bytes): remember the track's width and height for the hdlr hook. They sit past the
+ * bytes the parser hands its handler (+0x54 in version 0, +0x60 in version 1), so the box is read from the file. The
+ * stock handler keeps only the track_ID; MP4 VobSub tracks then reach the decoder with no frame size, and it assumes
+ * a 720x576 frame (NTSC 720x480 subtitles were drawn too high). */
+CAVE4 void mp4_tkhd(u8 *p, const u8 *b, u32 base) {
+    volatile struct st *s = ST(base);
+    u8 t[0x68]; u32 v = b[8], n = v == 1 ? 0x68 : 0x5c;
+    s->tk_tid = 0xff;
+    if ((u32)p != s->parser || v > 1) return;
+    if (((read_t)(base + VA_READ))(p, *(u64 *)(p + P_BOXPOS) - 4, t, n)) return;
+    if (be32(t + 4) != FCC('t','k','h','d') || be32(t) < n) return;
+    u32 tid = be32(t + (v == 1 ? 0x1c : 0x14));
+    if (tid >= MAXTRK) return;
+    s->tk_w = be32(t + n - 8) >> 16; s->tk_h = be32(t + n - 4) >> 16; s->tk_tid = tid;
+}
+
 CAVE3 void mp4_moov(u8 *p, const u8 *b, u32 base) {
     volatile struct st *s = ST(base);
     for (u32 i = 0; i < MAXTRK; i++) s->lang[i] = 0;
     s->tx3g = 0; s->parser = (u32)p; s->skip[0] = s->skip[1] = 0; s->hits[0]++;
+    s->nsd = 0; s->tk_tid = 0xff;
     u32 sel = s->pref[0][0] != 0;   /* track selection only with a language list; chapters always */
     struct scan c; c.p = p; c.base = base; c.reads = 0;
     struct trk t[MAXTRK]; u32 n = 0, na = 0, ns = 0;
@@ -229,6 +251,9 @@ CAVE3 void mp4_moov(u8 *p, const u8 *b, u32 base) {
 u32 mp4_hdlr(u8 *p, const u8 *b, u32 base) {
     volatile struct st *s = ST(base);
     u32 tid = *(u32 *)(p + P_TRACKID), h = be32(b + 0x10);
+    if ((u32)p == s->parser && h == FCC('s','u','b','p') && tid == s->tk_tid && s->tk_w && s->tk_h && s->nsd < SLOTS) {
+        u32 k = s->nsd++; s->sd[k].tid = tid; s->sd[k].w = s->tk_w; s->sd[k].h = s->tk_h;
+    }
     if ((u32)p != s->parser || tid >= MAXTRK || !(s->skip[tid >> 5] & (1u << (tid & 31)))) return 1;
     return !(h == FCC('s','o','u','n') || h == FCC('s','b','t','l') || h == FCC('s','u','b','p') || h == FCC('s','u','b','t'));
 }
@@ -262,13 +287,21 @@ u32 mp4_tx3g(u8 *p, u32 base) {
 /* After CLpMp4Parser::mrGetStreamInfo: tx3g tracks are UTF-8 text subtitles. */
 void mp4_gsi(u8 *p, u32 base) {
     volatile struct st *s = ST(base);
-    if ((u32)p != s->parser || !s->tx3g) return;
-    for (u32 i = 0; i < SLOTS; i++)
+    if ((u32)p != s->parser) return;
+    for (u32 i = 0; i < SLOTS; i++) {
+        u32 *r = (u32 *)(p + P_SPSTRM + i * 0x30);
         if (s->tx3g & (1u << i)) {
-            u32 *r = (u32 *)(p + P_SPSTRM + i * 0x30);
             u32 w = *(u16 *)(p + P_VIDW), h = *(u16 *)(p + P_VIDW + 2);
             if (r[1] != FMT_TEXT || r[4] != w) { r[1] = FMT_TEXT; r[3] = 1; r[4] = r[7] = w; r[5] = r[8] = h; s->hits[4]++; }
+        } else if (r[1] == FMT_DVDSP && i < p[P_NSP]) {
+            /* VobSub: its frame size, and the mode the MKV player derives from it (1 up to 480 lines, else 2) */
+            u32 tid = *(u32 *)(p + P_SPREC + i * REC_SIZE + REC_TID);
+            for (u32 k = 0; k < s->nsd && k < SLOTS; k++)
+                if (s->sd[k].tid == tid && (r[7] != s->sd[k].w || r[8] != s->sd[k].h)) {
+                    r[7] = s->sd[k].w; r[8] = s->sd[k].h; r[3] = s->sd[k].h > 480 ? 2 : 1; s->hits[4]++; break;
+                }
         }
+    }
 }
 
 static void send_lang(void *obj, volatile struct st *s, u32 type, u32 idx, u8 *rec, u32 base) {

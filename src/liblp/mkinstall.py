@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # Generate build/dvhook.sh: RAM installer for the liblp.so patch blobs into the running player (bdpprog.1 / liblp.so md5 e39b358c...).
 #   build/dvhook.bin    Dolby Vision (MKV signalling + MP4 dvvC), in the zero padding at the end of liblp's code segment
-#   mp4/build/mp4.bin   MP4 audio/subtitle languages + tx3g subtitles, MKV VobSub palette on a subtitle switch,
-#                       over vMPCTestOperation4 (MPC self-test code)
+#   mp4/build/mp4.bin   MP4 audio/subtitle languages + tx3g subtitles, over vMPCTestOperation4 (MPC self-test code)
 #   mp4/build/mp4b.bin  MP4 moov pre-scan (language list), over vMPCTestDvdRwdSpeedThr (MPC self-test code)
+#   mp4/build/mp4c.bin  subtitle fixes: MKV VobSub palette on a switch, MP4 VobSub frame size, over vMPCTestOperation1
 # dvhook.sh on|off|status|hvcc on|off. Checks liblp's md5 and every site's original contents, and verifies the written blobs.
 import os, struct, subprocess
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -16,6 +16,7 @@ def load(stem):
 blob, syms = load('build/dvhook')
 blob2, syms2 = load('mp4/build/mp4')
 blob3 = open('mp4/build/mp4b.bin', 'rb').read()   # moov pre-scan (same ELF, section .cave3)
+blob4 = open('mp4/build/mp4c.bin', 'rb').read()   # subtitle fixes (same ELF, section .cave4)
 def bl(src, dst, op=0xeb000000):
     off = (dst - (src + 8)) >> 2
     assert -(1 << 23) <= off < (1 << 23)
@@ -27,8 +28,10 @@ CAVE2, CAVE2_LEN = 0x5402fc, 0xae8                       # vMPCTestOperation4
 CAVE2_ORIG = 'f04f2de914d04de2cc899fe5cc399fe5'          # its first 16 bytes in liblp e39b358c
 CAVE3, CAVE3_LEN = 0x530de8, 0x9e4                       # vMPCTestDvdRwdSpeedThr
 CAVE3_ORIG = 'f04f2de914d04de2fc789fe5fc389fe5'          # its first 16 bytes in liblp e39b358c
-ST2, ST2LEN = 0x757e80, 0xe8                             # mp4.c struct st
-assert len(blob) <= 0x400 and len(blob2) <= CAVE2_LEN and len(blob3) <= CAVE3_LEN and ST + STLEN <= ST2 and ST2 + ST2LEN <= 0x758000
+CAVE4, CAVE4_LEN = 0x53f4c4, 0x7fc                       # vMPCTestOperation1
+CAVE4_ORIG = 'ff472de94c879fe54c379fe508808fe0'          # its first 16 bytes in liblp e39b358c
+ST2, ST2LEN = 0x757e80, 0x128                            # mp4.c struct st
+assert len(blob) <= 0x400 and len(blob2) <= CAVE2_LEN and len(blob3) <= CAVE3_LEN and len(blob4) <= CAVE4_LEN and ST + STLEN <= ST2 and ST2 + ST2LEN <= 0x758000
 hx = lambda b: ''.join('\\x%02x' % c for c in b)
 
 # code sites: (VA, original 4 bytes, new 4 bytes)
@@ -57,6 +60,7 @@ code.append((0x3e1128, struct.pack('<I', 0xe3500000), bl(0x3e1128, syms2['v_vobs
 data = [(0x6ee3a4, [0x402628], syms2['m_moov']),             # MP4 box dispatch table: moov handler
         (0x6ee2a0, [0x402920], syms2['m_mdhd']),             # MP4 box dispatch table: mdhd handler
         (0x6ee2b4, [0x403cc4], syms2['m_hdlrbox']),          # MP4 box dispatch table: hdlr handler
+        (0x6ee354, [0x4304d8], syms2['m_tkhd']),             # MP4 box dispatch table: tkhd handler (VobSub frame size)
         (0x6e25c0, [0x4085b8, 0x14ac64], syms2['m_gsi'])]    # GOT: CLpMp4Parser::mrGetStreamInfo (resolved, or lazy = .plt)
 # data sites whose original word is 0 (word VA, new VA): MPC1 command 0x15 (set subpicture palette) was accepted only in
 # the stop state (state 0); also accept it in states 1-5, 8, 9 (the states that accept 0x12, switch subpicture), through
@@ -99,6 +103,7 @@ on)
   [ "$st" = ok ] && {{ echo "already on"; exit 0; }}
   c=$(rd $((B + {CAVE2:#x})) 16); [ "$c" = {CAVE2_ORIG} ] || [ "$c" = {blob2[:16].hex()} ] || {{ echo "unexpected code at {CAVE2:#x}: $c"; exit 1; }}
   c=$(rd $((B + {CAVE3:#x})) 16); [ "$c" = {CAVE3_ORIG} ] || [ "$c" = {blob3[:16].hex()} ] || {{ echo "unexpected code at {CAVE3:#x}: $c"; exit 1; }}
+  c=$(rd $((B + {CAVE4:#x})) 16); [ "$c" = {CAVE4_ORIG} ] || [ "$c" = {blob4[:16].hex()} ] || {{ echo "unexpected code at {CAVE4:#x}: $c"; exit 1; }}
   restore
   printf '{hx(blob)}' | dd of=$M bs=1 seek=$((B + {CAVE:#x})) conv=notrunc 2>/dev/null
   [ "$(rd $((B + {CAVE:#x})) {len(blob)})" = "{blob.hex()}" ] || {{ echo "blob verify failed"; exit 1; }}
@@ -106,6 +111,8 @@ on)
   [ "$(rd $((B + {CAVE2:#x})) {len(blob2)})" = "{blob2.hex()}" ] || {{ echo "blob verify failed (mp4)"; exit 1; }}
   printf '{hx(blob3)}' | dd of=$M bs=1 seek=$((B + {CAVE3:#x})) conv=notrunc 2>/dev/null
   [ "$(rd $((B + {CAVE3:#x})) {len(blob3)})" = "{blob3.hex()}" ] || {{ echo "blob verify failed (mp4 pre-scan)"; exit 1; }}
+  printf '{hx(blob4)}' | dd of=$M bs=1 seek=$((B + {CAVE4:#x})) conv=notrunc 2>/dev/null
+  [ "$(rd $((B + {CAVE4:#x})) {len(blob4)})" = "{blob4.hex()}" ] || {{ echo "blob verify failed (subtitles)"; exit 1; }}
   dd if=/dev/zero of=$M bs=1 seek=$((B + {ST:#x})) count={STLEN} conv=notrunc 2>/dev/null
   dd if=/dev/zero of=$M bs=1 seek=$((B + {ST2:#x})) count={ST2LEN} conv=notrunc 2>/dev/null
   for e in $DSITES; do a=$((B + ${{e%%:*}})); wv $a $((B + ${{e##*:}})); done

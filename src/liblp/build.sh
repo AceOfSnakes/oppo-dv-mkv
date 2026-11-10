@@ -14,6 +14,8 @@ zig cc -target arm-freestanding-eabi $F -c mp4/shims.S -o mp4/build/shims.o
 ld.lld -static -T mp4/link.ld mp4/build/shims.o mp4/build/mp4.o -o mp4/build/mp4.elf
 llvm-objcopy -O binary -j .text mp4/build/mp4.elf mp4/build/mp4.bin
 llvm-objcopy -O binary -j .cave3 mp4/build/mp4.elf mp4/build/mp4b.bin
+llvm-objcopy -O binary -j .cave4 mp4/build/mp4.elf mp4/build/mp4c.bin
 [ $(stat -c %s mp4/build/mp4.bin) -le 2792 ] || { echo "mp4 blob does not fit vMPCTestOperation4"; exit 1; }
 [ $(stat -c %s mp4/build/mp4b.bin) -le 2532 ] || { echo "mp4 pre-scan blob does not fit vMPCTestDvdRwdSpeedThr"; exit 1; }
-md5sum build/dvhook.bin mp4/build/mp4.bin mp4/build/mp4b.bin
+[ $(stat -c %s mp4/build/mp4c.bin) -le 2044 ] || { echo "subtitle blob does not fit vMPCTestOperation1"; exit 1; }
+md5sum build/dvhook.bin mp4/build/mp4.bin mp4/build/mp4b.bin mp4/build/mp4c.bin
