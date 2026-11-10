@@ -56,6 +56,19 @@ code.append((0x408204, struct.pack('<I', 0x8a00000b), struct.pack('<I', 0xea0000
 # palette after a subtitle switch to a VobSub track (v_vobsw).
 code.append((0x3bf444, bl(0x3bf444, 0x158bd4), struct.pack('<I', 0xe1a00000)))             # bl x_memset -> nop
 code.append((0x3e1128, struct.pack('<I', 0xe3500000), bl(0x3e1128, syms2['v_vobsw'])))      # cmp r0, #0 -> bl
+# MKV PGS chosen after playback started on another subtitle format (Oppo bug: nothing drawn): feed the Blu-ray PG
+# decoder PES packets, one per segment (pg_feed), and release the real packet when all are consumed (pg_done).
+code.append((0x582bc4, bl(0x582bc4, 0x1512cc), bl(0x582bc4, syms2['p_feed'])))               # bl TSFile_ConsumeData
+code.append((0x58abdc, struct.pack('<I', 0xe92d4070), bl(0x58abdc, syms2['p_done'], B_AL)))   # push {r4-r6, lr} -> b
+# MKV that starts on a PGS track and also has other subtitle formats (Oppo bug: after a switch nothing was drawn and
+# the last PGS line stayed): use the subtitle decoder from the start (p_mode), with its screen plane (p_scr), and no
+# full stream change when the player program sets the start track again (p_same).
+code.append((0x3d2370, struct.pack('<I', 0xe3a01001), bl(0x3d2370, syms2['p_mode'])))        # mov r1, #1 -> bl
+code.append((0x3e0a40, bl(0x3e0a40, 0x3e07e8, B_AL), bl(0x3e0a40, syms2['p_same'], B_AL)))    # b -> b
+code.append((0x57e36c, struct.pack('<I', 0x1a000003), bl(0x57e36c, syms2['p_scr'], B_AL)))    # bne -> b
+# PG decoder clock (Oppo bug: given 90 kHz where it counts in 45 kHz, and a stale start time after a seek).
+code.append((0x58affc, bl(0x58affc, 0x163f8c), bl(0x58affc, syms2['p_texp'])))               # bl TSFile_TimeExpired
+code.append((0x573908, bl(0x573908, 0x14b4d0), bl(0x573908, syms2['p_start'])))              # bl TSFile_Start
 # data sites, absolute addresses (runtime base + VA): (word VA, accepted original VAs, new VA)
 data = [(0x6ee3a4, [0x402628], syms2['m_moov']),             # MP4 box dispatch table: moov handler
         (0x6ee2a0, [0x402920], syms2['m_mdhd']),             # MP4 box dispatch table: mdhd handler

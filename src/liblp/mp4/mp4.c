@@ -63,10 +63,12 @@ struct st {
     u32 hits[8];     /* moov, mdhd, lang calls, tx3g, gsi fixes, lang msgs, text strips, queued line ends */
     u32 scan[4];     /* last pre-scan: reads, tracks, audio candidates << 16 | subtitle candidates, skipped */
     u8 tk_tid, nsd;  /* last tkhd's track_ID; VobSub frame sizes kept in sd[] */
-    u16 tk_w, tk_h, rsv;   /* last tkhd's width and height (integer pixels) */
+    u16 tk_w, tk_h;  /* last tkhd's width and height (integer pixels) */
+    u8 pgmix, rsv;   /* the MKV being played has PGS and other subtitle formats (pg_mode; ST_PGMIX in shims.S) */
     struct { u8 tid, rsv; u16 w, h, rsv2; } sd[SLOTS];   /* 'subp' (VobSub) tracks: frame size from their tkhd */
 };
 #define ST(base) ((volatile struct st *)((base) + ST_VA))
+_Static_assert(__builtin_offsetof(struct st, pgmix) == 0xe6 && sizeof(struct st) == 0x128, "struct st layout (shims.S, mkinstall.py)");
 
 struct langmsg { u32 type; u16 idx; u8 c[3]; };
 typedef void (*send_t)(void *obj, u32 msg, void *data);
@@ -197,11 +199,96 @@ CAVE4 void mp4_tkhd(u8 *p, const u8 *b, u32 base) {
     s->tk_w = be32(t + n - 8) >> 16; s->tk_h = be32(t + n - 4) >> 16; s->tk_tid = tid;
 }
 
+/* MKV PGS subtitles chosen after playback started on a text or VobSub track (Oppo bug: nothing was drawn).
+ * After such a switch the subtitle decoder (SPS) hands the track's data to the player program's Blu-ray PG decoder
+ * (TSFile_ConsumeData), which parses every packet as an MPEG PES packet (00 00 01 BD, PES header with PTS/DTS) holding
+ * ONE PGS segment, as in a transport stream. A Matroska block is a whole display set of bare segments, so the decoder
+ * read no time stamps and dropped everything ("segment ignored; is not a PCS"). pg_feed gives it one packet per
+ * segment: a PES header fragment chained to the segment (the decoder walks fragment lists). The packets live in two
+ * heap blocks, freed when the decoder has reported every one of them consumed; only then the real packet is released. */
+#define VA_TSCONSUME 0x1512ccu  /* .plt TSFile_ConsumeData(packet) */
+#define VA_ALLOC     0x156198u  /* .plt x_mem_alloc(size) */
+#define VA_FREE      0x166398u  /* .plt x_mem_free(ptr) */
+#define ESH_PTS      0x18       /* SPS packet (ESH): u64 PTS, 90 kHz; [0] = fragment list, [1] = next packet */
+#define PG_MAGIC     0x53475050u
+struct frag { u8 *p; u32 n; struct frag *next; };
+struct pgblk { u32 magic; void *esh; u32 left; void *pk; };
+struct pgpk { struct frag *f; void *next; u32 magic; struct pgblk *b; struct frag f1, f2; u8 h[20]; };
+typedef void *(*alloc_t)(u32); typedef void (*free_t)(void *); typedef u32 (*cons_t)(void *);
+
+static void pes_ts(u8 *h, u32 mark, u64 t) {
+    h[0] = mark | ((u32)(t >> 30) & 7) << 1 | 1; h[1] = t >> 22; h[2] = ((u32)(t >> 15) & 0x7f) << 1 | 1;
+    h[3] = t >> 7; h[4] = ((u32)t & 0x7f) << 1 | 1;
+}
+
+CAVE4 void pg_feed(void **esh, u32 base) {
+    cons_t consume = (cons_t)(base + VA_TSCONSUME);
+    struct frag *f = esh[0], *g; u32 total = 0, n = 0, o, l;
+    for (g = f; g; g = g->next) total += g->n;
+    for (g = f; g && !g->n; g = g->next) ;
+    if (!g || total < 3 || !g->p[0]) goto raw;            /* 00 00 01: already a PES packet (transport stream) */
+    struct pgblk *b = ((alloc_t)(base + VA_ALLOC))(sizeof *b + total);
+    if (!b) goto raw;
+    u8 *d = (u8 *)(b + 1);
+    for (g = f, o = 0; g; g = g->next) for (l = 0; l < g->n; l++) d[o++] = g->p[l];
+    for (o = 0; o + 3 <= total && (l = 3 + (d[o + 1] << 8 | d[o + 2])) <= total - o; o += l) n++;
+    struct pgpk *k = n ? ((alloc_t)(base + VA_ALLOC))(n * sizeof *k) : 0;
+    if (!k) { ((free_t)(base + VA_FREE))(b); goto raw; }
+    b->magic = PG_MAGIC; b->esh = esh; b->left = n; b->pk = k;
+    u64 pts = *(u64 *)((u8 *)esh + ESH_PTS);
+    for (o = 0, l = 0; l < n; l++, k++) {
+        u32 sl = 3 + (d[o + 1] << 8 | d[o + 2]);
+        k->f = &k->f1; k->next = 0; k->magic = PG_MAGIC; k->b = b;
+        k->f1.p = k->h; k->f1.n = 19; k->f1.next = &k->f2;
+        k->f2.p = d + o; k->f2.n = sl; k->f2.next = 0;
+        k->h[0] = 0; k->h[1] = 0; k->h[2] = 1; k->h[3] = 0xbd; k->h[4] = 0; k->h[5] = 0;
+        k->h[6] = 0x80; k->h[7] = 0xc0; k->h[8] = 10;
+        pes_ts(k->h + 9, 0x30, pts); pes_ts(k->h + 14, 0x10, pts);
+        o += sl;
+    }
+    for (k = b->pk, l = 0; l < n; l++) consume(k + l);    /* b may be gone after the last one */
+    return;
+raw:
+    consume(esh);
+}
+
+/* MKV file open: 1 = keep the stock choice for a file that starts on a PGS track (the player program draws PGS itself
+ * and no subtitle decoder exists: the other formats could never be drawn after a switch, and the last PGS line stayed
+ * on screen), 0 = use the subtitle decoder, as for every other start track. 0 only when the file also has subtitles in
+ * another format or external subtitles; a PGS-only file plays as before. */
+#define X_MKVNSP     0x125      /* MKV proxy: u8 subtitle tracks in the file (u4GetIntSpCount's byte is set later) */
+#define VA_NEXTSP    0x3cbd98u  /* CLpMkvMediaManagerProxy::u4GetExtSpCount() */
+#define VA_SPINF     0x3ba798u  /* CLpMkvParser::vGetSpStrmInf(MPCSpElmStrmInf&, uchar): format at +4 */
+#define X_MKVPARSER  0x114      /* MKV proxy: CLpMkvParser* */
+#define FMT_PGS      0xc
+typedef u32 (*cnt_t)(void *); typedef void (*spinf_t)(void *, u32 *, u32);
+CAVE4 u32 pg_mode(u8 *x, u32 base) {
+    u32 inf[12], i, n = x[X_MKVNSP], mix = ((cnt_t)(base + VA_NEXTSP))(x) != 0;
+    for (i = 0; i < n && !mix; i++) {
+        inf[1] = FMT_PGS;
+        ((spinf_t)(base + VA_SPINF))(*(void **)(x + X_MKVPARSER), inf, i);
+        mix = inf[1] != FMT_PGS;
+    }
+    ST(base)->pgmix = mix;
+    return !mix;
+}
+
+/* The PG decoder consumed a packet: one of ours -> 0 until the last of its block, then the real packet to release. */
+CAVE4 void *pg_done(struct pgpk *k, u32 base) {
+    if (k->magic != PG_MAGIC || k->b->magic != PG_MAGIC) return k;
+    struct pgblk *b = k->b;
+    if (--b->left) return 0;
+    void *esh = b->esh;
+    b->magic = 0;
+    ((free_t)(base + VA_FREE))(b->pk); ((free_t)(base + VA_FREE))(b);
+    return esh;
+}
+
 CAVE3 void mp4_moov(u8 *p, const u8 *b, u32 base) {
     volatile struct st *s = ST(base);
     for (u32 i = 0; i < MAXTRK; i++) s->lang[i] = 0;
     s->tx3g = 0; s->parser = (u32)p; s->skip[0] = s->skip[1] = 0; s->hits[0]++;
-    s->nsd = 0; s->tk_tid = 0xff;
+    s->nsd = 0; s->tk_tid = 0xff; s->pgmix = 0;
     u32 sel = s->pref[0][0] != 0;   /* track selection only with a language list; chapters always */
     struct scan c; c.p = p; c.base = base; c.reads = 0;
     struct trk t[MAXTRK]; u32 n = 0, na = 0, ns = 0;
@@ -297,8 +384,12 @@ void mp4_gsi(u8 *p, u32 base) {
             /* VobSub: its frame size, and the mode the MKV player derives from it (1 up to 480 lines, else 2) */
             u32 tid = *(u32 *)(p + P_SPREC + i * REC_SIZE + REC_TID);
             for (u32 k = 0; k < s->nsd && k < SLOTS; k++)
-                if (s->sd[k].tid == tid && (r[7] != s->sd[k].w || r[8] != s->sd[k].h)) {
-                    r[7] = s->sd[k].w; r[8] = s->sd[k].h; r[3] = s->sd[k].h > 480 ? 2 : 1; s->hits[4]++; break;
+                if (s->sd[k].tid == tid) {   /* every call: the parser sets the mode again, not the size */
+                    u32 m = s->sd[k].h > 480 ? 2 : 1;
+                    if (r[3] != m || r[7] != s->sd[k].w || r[8] != s->sd[k].h) {
+                        r[7] = s->sd[k].w; r[8] = s->sd[k].h; r[3] = m; s->hits[4]++;
+                    }
+                    break;
                 }
         }
     }

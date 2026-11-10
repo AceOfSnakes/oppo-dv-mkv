@@ -155,3 +155,82 @@ v_pltst:
     ldr r0, =0xa100010f
     bx lr
     .ltorg
+
+@ MKV PGS after a subtitle switch (see pg_feed in mp4.c). p_feed replaces "bl TSFile_ConsumeData" in mrSpsGetAuTblData
+@ (0x582bc4, r0 = packet). p_done replaces the first instruction of SpsTsPgDataConsumedCb (0x58abdc, r0 = packet).
+p_feed:
+    push {r4, lr}
+    GETBASE
+    bl pg_feed                 @ (packet, base)
+    pop {r4, pc}
+
+p_done:
+    push {r4, lr}
+    GETBASE
+    bl pg_done                 @ (packet, base) -> packet to release, 0 = none yet
+    pop {r4, lr}
+    cmp r0, #0
+    bxeq lr
+    push {r4, r5, r6, lr}      @ the replaced instruction
+    b pgdone_cont
+
+@ MKVs with PGS and other subtitle formats (see pg_mode in mp4.c). ST_PGMIX = struct st .pgmix.
+.equ ST_PGMIX, 0x757e80 + 0xe6
+.macro GETMIX                  @ pgmix -> r1 (flags set), clobbers r2
+    GETBASE
+    ldr r2, =ST_PGMIX
+    ldrb r1, [r1, r2]
+    cmp r1, #0
+.endm
+
+@ CLpMkvMediaManagerProxy::mrMkvSetFileInf, 0x3d2370 "mov r1, #1" (start track is PGS: let the player program draw the
+@ subtitles) -> r1 = pg_mode(proxy). r0 = CLpMovieMpcWrapper* is kept; r4 = proxy.
+p_mode:
+    push {r0, r2, r3, lr}
+    GETBASE
+    mov r0, r4
+    bl pg_mode                 @ (proxy, base)
+    mov r1, r0
+    pop {r0, r2, r3, pc}
+
+@ CLpMkvMediaManagerProxy::mrChangeSpStNo, 0x3e0a40 "b 0x3e07e8": the same subtitle track is set again, it is track 1
+@ and PGS -> stock does a full stream change (the player program sets the start subtitle again right after every
+@ start and seek). With the subtitle decoder in use that restarts the PG decoder, which loses the display sets it
+@ already has (several seconds of subtitles): treat it like any other track then.
+p_same:
+    push {r1, r2}
+    GETMIX
+    pop {r1, r2}
+    bne mkv_same_sw            @ just switch the subtitle on
+    b mkv_same_chg
+
+@ mrSpsInitScreenPlane, 0x57e36c "bne 0x57e380" (after cmp r3, #0xc): stock opens no screen plane when the decoder
+@ starts in the PGS format (transport streams); nothing can be shown then in an MKV, not even after a switch to a text
+@ track. Open it for an MKV with mixed subtitle formats.
+p_scr:
+    bne sps_scr_open
+    push {r1, r2}
+    GETMIX
+    pop {r1, r2}
+    bne sps_scr_open
+    b sps_scr_none
+    .ltorg
+
+@ The player program's PG decoder counts in 45 kHz (PES time stamps halved) and hands its timers to the subtitle
+@ decoder in 90 kHz, but stock gives it the current time back in 90 kHz (Oppo bug): after the first timer the decoder
+@ believes it is twice as far into the film and shows or clears every display set the moment it arrives; after a seek
+@ the read-ahead burst then shows and clears a subtitle at once (the first one was lost). p_texp replaces
+@ "bl TSFile_TimeExpired" in mrTsSpsDecoder (0x58affc; r0:r1 = when, r2:r3 = now, both 90 kHz): halve both.
+p_texp:
+    lsrs r1, r1, #1
+    rrx r0, r0
+    lsrs r3, r3, #1
+    rrx r2, r2
+    b TSFile_TimeExpired
+
+@ "bl TSFile_Start" in mrSpsDcmdPlay (0x573908; r0:r1 = the clock when the decoder is started, 90 kHz, and after a
+@ seek still the position before it): start the PG decoder's clock at 0, so every display set gets a timer.
+p_start:
+    mov r0, #0
+    mov r1, #0
+    b TSFile_Start
