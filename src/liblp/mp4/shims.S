@@ -35,6 +35,15 @@ m_hdlrbox:                     @ box handler for hdlr (r0 = parser, r2:r3 = u64,
     bxeq lr                    @ not handled: the track stays of unknown type and is ignored
     b orig_hdlr
 
+m_tkhd:                        @ box handler for tkhd (r0 = parser, r2:r3 = u64, [sp] = box)
+    push {r0-r3, r12, lr}
+    GETBASE
+    mov r2, r1
+    ldr r1, [sp, #24]          @ box
+    bl mp4_tkhd                @ (parser, box, base)
+    pop {r0-r3, r12, lr}
+    b orig_tkhd
+
 m_mdhd:                        @ box handler (r0 = parser, r2:r3 = u64, [sp] = box)
     push {r0-r3, r12, lr}
     GETBASE
@@ -101,5 +110,48 @@ m_srt:                         @ mrSpsDecTextStringByFormat: bl mrSpsDecStringBy
     bl mp4_srt                 @ (decoder, base)
     pop {r0-r3, r12, lr}
     mov r0, r12
+    bx lr
+
+    .ltorg
+
+    .section .text.cave4,"ax"
+@ MKV VobSub palette on a subtitle switch (Oppo bug: the palette reached the decoder only when playback started on the
+@ VobSub track, so a VobSub track chosen later kept the previous palette, e.g. green). Replaces "cmp r0, #0" right after
+@ CLpMovieMpcWrapper::mrChangeStreamInfo in CLpMkvMediaManagerProxy::mrChangeSpStNo (0x3e1128). On the internal-track
+@ path (r6 == 1) sl points at the new track's MPCSpElmStrmInf (format at +4, 7 = VobSub); the parser keeps the VobSub
+@ palette at +0x2e24. MPC command 0x15 (set palette) is also allowed while playing (data sites in mkinstall.py).
+@ Returns with the flags of "cmp r0, #0" (beq follows).
+v_vobsw:
+    cmp r0, #0
+    bxne lr                    @ stream change failed: unchanged
+    cmp r6, #1                 @ internal subtitle track?
+    bne 9f
+    ldr r0, [sl, #4]
+    cmp r0, #7                 @ VobSub?
+    bne 9f
+    push {r1-r3, lr}
+    ldr r0, [r4, #0x80]        @ CLpMovieMpcWrapper*
+    ldr r1, [r4, #0x114]       @ CLpMkvParser*
+    add r1, r1, #0x2e00
+    add r1, r1, #0x24          @ its VobSub palette, 16 x 4 bytes
+    mov r2, #0x40
+    bl mrSetSpPalette
+    pop {r1-r3, lr}
+9:  mov r0, #0
+    cmp r0, #0
+    bx lr
+
+@ MPC1 command 0x15 (set subpicture palette) in the playing states 1-5, 8, 9 (stock: state 0 only). r0 = MPC context.
+@ The stock handler asserts when there is no SPS decoder (id at +0x309b4 == -1, e.g. a file that started on a PGS
+@ track, whose subtitles the player program draws): refuse those with the stock failure code instead.
+v_pltst:
+    ldr r1, =0x30a75
+    ldrb r1, [r0, r1]          @ SDK internal subpicture mode (the stock handler only logs then)
+    ldr r2, =0x309b4
+    ldr r2, [r0, r2]           @ SPS decoder id
+    cmp r1, #0
+    cmneq r2, #1
+    bne mrMPC1ProcSetSpPltInStopSt
+    ldr r0, =0xa100010f
     bx lr
     .ltorg
