@@ -43,3 +43,13 @@ H=$(od -An -v -tx1 build/arflag.bin | tr -d ' \n')
 [ $(stat -c %s build/sar.bin) -le $((0x7e94d680 - 0x7e94d600)) ] || { echo "sar.S runs into arflag.S"; exit 1; }
 [ $(stat -c %s build/arflag.bin) -le $((0x7e94d728 - 0x7e94d680)) ] || { echo "arflag.S does not fit its cave"; exit 1; }
 echo "arflag.sh stub matches arflag.S"
+# dvexit.sh carries its bdpdrv1 stub as hex, without the last word (the address of vDolbyHdrEnable's literal, which
+# the script finds on the player): rebuild it from dvexit.S (cave 0x7e94d6c4, after arflag.S; RU literal) and compare
+zig cc -target arm-freestanding-eabi -mcpu=cortex_a9 -marm -c dvexit.S -o build/dvexit.o
+ld.lld -static -Ttext=0x7e94d6c4 -e dvexit build/dvexit.o -o build/dvexit.elf
+llvm-objcopy -O binary -j .text build/dvexit.elf build/dvexit.bin
+H=$(od -An -v -tx1 build/dvexit.bin | tr -d ' \n')
+[ "$H" = "$(sed -n 's/^STUB=//p' dvexit.sh)0079bc7e" ] || { echo "dvexit.sh STUB does not match dvexit.S"; exit 1; }
+[ $(stat -c %s build/arflag.bin) -le $((0x7e94d6c4 - 0x7e94d680)) ] || { echo "arflag.S runs into dvexit.S"; exit 1; }
+[ $(stat -c %s build/dvexit.bin) -le $((0x7e94d724 - 0x7e94d6c4)) ] || { echo "dvexit.S does not fit its cave"; exit 1; }
+echo "dvexit.sh stub matches dvexit.S"

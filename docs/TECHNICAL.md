@@ -20,6 +20,7 @@ The hardware is a MediaTek MT8581 (4× Cortex-A9) running Linux 3.10.
 | Black letterbox bars in Dolby Vision (v1.6.0) | `bdpdrv1` kernel module (via `/dev/mem`), one instruction | `src/kernel/bgfix.sh` | none |
 | Non-square pixels stretched to 16:9 (v1.7.0) | `bdpdrv1` kernel module (via `/dev/mem`), two branches + a 30-word stub | `src/kernel/sarfix.sh` | `src/kernel/sar.S` |
 | 4:3 / 16:9 flag of SD files in Source Direct (v1.9.0) | `bdpdrv1` kernel module (via `/dev/mem`), one call + a 17-word stub | `src/kernel/arflag.sh` | `src/kernel/arflag.S` |
+| Dolby Vision left on after playback (v2.0.0) | `bdpdrv1` kernel module (via `/dev/mem`), one instruction + an 18-word stub | `src/kernel/dvexit.sh` | `src/kernel/dvexit.S` |
 | MKVs without parameter sets in the hvcC (v1.7.0) | `splitter.ko` kernel module (via `/dev/mem`), one branch + a 16-instruction stub | `src/kernel/hvccfix.sh` | `src/kernel/hvcc.S` |
 | ALAC decoder of firmware 56/60 (v1.7.0) | `/res/bdpaudec.db` (symlink swapped by the boot wrapper) | `install.sh` builds it | `src/audio/alacdec.bin` |
 | Better subtitles | running `bdpprog.1` + `liblp.so` (RU 65-0131 program) | `subs.sh` | `src/subtitles/` |
@@ -637,6 +638,59 @@ site word and the cave's 17 original words; `off` restores them. The cave is wri
 
 Debugging: VDP log flags as in Part 2c show `TV ASP`, `Src Asp`, `Src AR` and `FIX ASP`; `_u1HDMIPar` /
 `_u1HDMIAfd` are at `0x7ed2ce58` / `0x7ed2ce59` in the RU build.
+
+## Part 2c-3: bdpdrv1 (Dolby Vision left on after playback, `dvexit.sh`, v2.0.0)
+
+Addresses are bdpdrv1 virtual addresses (module at `0x7e8d3000`), data addresses those of the RU build.
+
+Two flags, read by `VDP_Hal_Isr` at `+0x46c` and `+0xa3e` of one base: `_bVideoDobly` (`0x7ee3c50c`, the video path
+is Dolby Vision) and `_bVideoDoblyPre` (`0x7ee3cade`). At every vsync the interrupt compares them, switches a
+hardware path bit when they differ, and copies the first to the second (`0x7e9955e4`).
+
+`VDP_Routine` handles the "HDR information changed" event (bit `0x800` of its event word, `0x7e9b3e8c`) in the block
+from `0x7e9b44ec`. From `0x7e9b5044` on, with sb = `&_u4VdpDolbySrcType` (`0x7ee3c928`): for a Dolby source it
+switches the HDMI signalling on (`vDolbyHdrEnable(1)`, or `vLowLatencyDolbyVisionEnable(1)` for the low latency
+output modes); for no Dolby source it prints `disable dovi path` and leaves r7 = 0. Then, at `0x7e9b5204`:
+
+```
+cmp   r7, #0
+bne   skip
+ldr   r3, =_bVideoDoblyPre
+ldrb  r3, [r3]                 ; 0x7e9b5210, the site
+cmp   r3, #0
+beq   skip
+mov   r0, r7 ; bl vDolbyHdrEnable ; mov r0, r7 ; bl vLowLatencyDolbyVisionEnable ; clear two sync flags
+```
+
+So the HDMI side leaves Dolby Vision only if the routine handles the event while the interrupt has not yet copied a
+cleared `_bVideoDobly` into the marker. With Output Resolution on Source Direct a stop also changes the HDMI
+resolution, the routine runs late, and the kernel log of a bad stop has `disable dovi path` without the
+`[HDMI][HDR] _fgDolbyHdrEnable =0` line that follows it in a good one. Afterwards `_fgDolbyHdrEnable` (HDMI state
+`0x7eea9788` `+0x87d`) is still 1 with source type, `_bVideoDobly` and the marker all 0, and the event does not come
+again: the menu goes out with the Dolby Vision signalling. The fault is stock; with oppo-dv-mkv v1.9.0 it was hit on
+about three stops of four (the extra work in the player program at a stop changes the timing).
+
+The patch: site `0x7e9b5210` (`0030d3e5` → `2b61feeb`) calls the stub in `dvexit.S` at `0x7e94d6c4`, behind
+`arflag.S` in the same unused function tail (the function's own return is at `0x7e94d724`). It returns the marker in
+r3 when that is set. Otherwise, when `[sb]` is 0 and `_bVideoDobly` (marker address `- 0x5d2`) is 0, it returns
+`_fgDolbyHdrEnable | _fgLowLatencyDolbyVisionEnable`, so the stock switch-off that follows runs once (both HDMI
+functions return at once when their flag already has the value). A source type other than 0 covers Dolby sources
+and the forced graphics-only mode (`VDPDoviHdrForceRun` sets type `0x10`). The stub uses r1 and r2, which are free
+there (the path that follows calls functions).
+
+The VDP code is at the same addresses in every build we have, the HDMI code is not (`vDolbyHdrEnable` is at
+`0x7ebc7860` in RU, `+0x30` in the USA builds, `-0x10` in the `+0x50` build, `+0x4` in the CXUHD). The stub's last
+word is therefore written by `dvexit.sh`: the address of the literal in `vDolbyHdrEnable` that holds the HDMI state
+base (function `+0xa0`), with the function found through the `bl` at `0x7e9b5220`.
+
+`dvexit.sh` checks the test and the switch-off around the site (apart from the two `bl` words), the `ldr sb` at
+`0x7e9b5044` and its use at `0x7e9b52a4`, the two flag offsets in `VDP_Hal_Isr`, 12 bytes of each of the two HDMI
+functions (the loads at `+0x87d` and `+0x87e`), that both functions use the same base, the site word and the cave's
+18 original words; `off` restores them. The cave is written first, then the site. `build.sh` assembles `dvexit.S`,
+checks it against the hex in `dvexit.sh` plus the RU literal, and checks that the stubs fit one behind the other.
+Tested with the script on every driver image and the stub's 48-case truth table in an emulator.
+
+The patch does not bring back a menu that is already black: the next stop does.
 
 ## Part 2d: audio DSP decoders (`bdpaudec.db`, v1.7.0)
 

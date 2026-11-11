@@ -119,6 +119,7 @@ MKV fix, and every place is checked before it is written.
 | ↕️ | **VobSub subtitles far too high** on the screen | MP4 with VobSub from NTSC DVDs (720x480) | ✅ in their place, and they stay there (v1.9.0) | v1.8.1 | [fix 19](#19-mp4-vobsub-subtitles-too-high-v181) |
 | 📺 | **4:3 picture stretched to 16:9** by the TV in Source Direct | SD H.264 in MKV (576 and 480 lines) | ✅ flagged 4:3, bars left and right | v1.9.0 | [fix 22](#22-wrong-43--169-flag-for-sd-files-in-source-direct-v190) |
 | 📺 | **16:9 picture squeezed to 4:3** by the TV in Source Direct | SD H.264 and HEVC in M2TS and MP4 | ✅ flagged 16:9, full width | v1.9.0 | [fix 22](#22-wrong-43--169-flag-for-sd-files-in-source-direct-v190) |
+| ⬛ | **Black home menu and screen saver after a Dolby Vision film**, TV still in Dolby Vision, with Output Resolution on Source Direct | any Dolby Vision file | ✅ back to the normal menu | v2.0.0 | [fix 23](#23-dolby-vision-stays-on-after-playback-black-menu-v200) |
 | 🙈 | **No subtitles at all** in most ordinary MP4 films | MP4 with 2+ audio and 2+ subtitle tracks, or big low-bitrate files | ✅ shown | v1.8.0 | [fix 15](#15-mp4-subtitles-hidden-by-the-bad-interleave-mode-v180) |
 | 🔤 | **MP4 text subtitles not shown**, no languages in the menus | MP4 with `tx3g` / `mov_text` | ✅ shown, languages listed | v1.8.0 | [fix 16](#16-mp4-text-subtitles-languages-and-the-8-tracks-v180) |
 | 📐 | **Picture stretched to almost 16:9**, bars too thin | films with slightly non-square pixels (e.g. 3840x1744) | ✅ right bars | v1.7.0 | [fix 13](#13-non-square-pixels-stretched-to-169-v170) |
@@ -462,7 +463,7 @@ are not.
 - **MKV DV stopped working after a firmware update.** The patches only apply to the firmware they were made for, so
   the patcher logs a mismatch and does nothing.
 - **Check that it is active:** `dvmkv.log` on the player should contain `dvhook: dvhook ON`, `p7kel: p7kel ON`,
-  `bgfix: on (on)` (since v1.6.0), `sarfix: on (on)`, `arflag: on (on)` (since v1.9.0), `hvccfix: on (on)` and `dvhook: empty hvcC (no VPS/SPS/PPS):
+  `bgfix: on (on)` (since v1.6.0), `sarfix: on (on)`, `arflag: on (on)` (since v1.9.0), `dvexit: on (on)` (since v2.0.0), `hvccfix: on (on)` and `dvhook: empty hvcC (no VPS/SPS/PPS):
   DV allowed` (since v1.7.0), `dvhook: MP4 language list: ...` (since v1.8.0) and `boot marked healthy`.
 
 ## What was broken, and how it was fixed
@@ -859,6 +860,27 @@ knows, and asks for 4:3 when it is narrower than 3:2 and for 16:9 otherwise. MPE
 every other output resolution are unchanged. The patched code is the same in every firmware we have (RU, USA,
 Cambridge CXUHD).
 
+### 23. Dolby Vision stays on after playback, black menu (v2.0.0)
+
+**Symptom:** with Output Resolution set to Source Direct, after a Dolby Vision file is stopped or ends, the home
+menu and the screen saver are black and the TV stays in Dolby Vision. Playing and stopping another file may bring the
+menu back. With Output Resolution on Auto it does not happen. In our tests it happened on about three stops out of
+four with oppo-dv-mkv v1.9.0 installed, with every kind of Dolby Vision file, also the ones the Oppo plays without
+this project. The fault is in Oppo's driver and is a matter of timing; the stock player passed the one stop we
+tried, so we cannot say how often it shows there.
+
+**Cause:** at the end of playback the video driver tells the HDMI output to leave Dolby Vision only if a "the video
+was Dolby Vision" marker is still set at that moment. The same marker is refreshed by the display interrupt at every
+frame. In Source Direct the stop also changes the output resolution, the driver gets to that step late, the
+interrupt has cleared the marker first, and the step is skipped. Nothing tries again, so the menu is sent as a Dolby
+Vision signal, which the TV shows as black.
+
+**Fix:** a short patch in the video driver (`dvexit.sh`, part of the Dolby Vision MKV fix): at that step, when the
+marker is already clear, no Dolby Vision source or video path is left and the HDMI output still signals Dolby Vision
+(TV-led or low latency), the driver leaves Dolby Vision all the same. Every other case is unchanged. The patched
+code is the same in every firmware we have (RU, USA, Cambridge CXUHD); the HDMI code it reads from sits at a
+different address in each, which `dvexit.sh` finds on the player.
+
 ## Tests
 
 All tests were run on one Oppo UDP-203 with the RU 65-0131 jailbreak, connected through an AV receiver to a Dolby
@@ -1064,6 +1086,26 @@ width of the picture it shows), and screen grabs checked the box.
 
 Not tested: DVDs and SD extras of Blu-ray discs in Source Direct.
 
+### Dolby Vision off after playback (v2.0.0)
+
+Output Resolution: Source Direct, TV-led Dolby Vision, LG C1. After each stop the player's HDR status was read over
+IP control and the TV's picture was grabbed (a black menu reads as an all-black frame).
+
+| Test | Result |
+|---|---|
+| v1.9.0, stop after 15 s, Dolby Vision transport stream (played by the stock player code) | menu black and TV in Dolby Vision on about 3 stops of 4 |
+| Stock player (all patches off for one boot), same file | 1 stop, menu right (too few to say it never happens) |
+| With the patch: the same file, 8 stops in a row | **8 of 8** back to the normal menu |
+| With the patch: profile 7 FEL MKV, profile 8 MKV, profile 5 MKV, profile 8 MP4, dual-track M2TS | all back to the normal menu |
+| With the patch: last file of a folder played to its end | 3 of 3 back to the normal menu |
+| Patch switched off again | black menu on the first stop; on again: 4 of 4 right |
+| Output Resolution Auto, with the patch | unchanged, right |
+| Installed persistently, after a reboot | `dvexit: on (on)` in the boot log; 8 stops and 2 file ends, all right |
+| `dvexit.sh` on the driver images of every player we have a dump of (RU, several USA players, the +0x50 build, Cambridge CXUHD), simulated | check, on, off and status work in all of them, off gives back the original bytes, `p7kel.sh` still fits |
+| The stub in an ARM emulator on each of those images, 48 cases (marker, source type, video path, the two HDMI flags) | all as expected |
+
+Not tested: low latency (player-led) Dolby Vision, Dolby Vision discs, other TVs.
+
 ### Extras (v1.7.1)
 
 | Test | Result |
@@ -1160,6 +1202,7 @@ program if that file exists. The installer puts there:
 /mnt/ubi_boot/oppo-dv-mkv/bgfix.sh    kernel patch, black letterbox bars in Dolby Vision (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/sarfix.sh   kernel patch, non-square pixels stretched to 16:9 (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/arflag.sh   kernel patch, 4:3 / 16:9 flag of SD files in Source Direct (on|off|status|check)
+/mnt/ubi_boot/oppo-dv-mkv/dvexit.sh   kernel patch, Dolby Vision left on after playback, black menu (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/hvccfix.sh  kernel patch, MKVs without VPS/SPS/PPS in the hvcC (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/subs.sh     subtitle patch (one layout per regional v65 player program; check)
 /mnt/ubi_boot/oppo-dv-mkv/image_bdp83.bin  subtitle colour menu image, built at install time, swapped into /res at boot
@@ -1230,6 +1273,14 @@ requests.
 </p>
 
 ## Changelog
+
+- **v2.0.0 (in progress, not released).**
+  - **Black home menu after a Dolby Vision film in Source Direct:** the TV stayed in Dolby Vision after a stop or
+    the end of a file and the menu and screen saver were black (a timing fault in Oppo's driver that showed often
+    with v1.9.0 installed). A short patch in the video driver (`dvexit.sh`, part of the Dolby Vision MKV fix, every
+    place checked before it is written) makes the player leave Dolby Vision. See
+    [fix 23](#23-dolby-vision-stays-on-after-playback-black-menu-v200).
+  - Updating from v1.9.0 adds `dvexit.sh` and replaces `dvmkv.sh`.
 
 - **v1.9.0: every subtitle format with every other one; the 4:3 / 16:9 flag in Source Direct.** All of these
   are Oppo's bugs, also on stock firmware; see the table in
