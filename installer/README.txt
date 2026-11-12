@@ -13,6 +13,9 @@ Since v1.9.0: SD files (576/480 lines) played with Output Resolution = Source Di
 over HDMI (4:3 H.264 MKVs were shown stretched, 16:9 H.264/HEVC in M2TS/MP4 squeezed; a player bug).
 Since v2.0.0: with Output Resolution = Source Direct the player leaves Dolby Vision when a film stops or ends
 (the home menu and screen saver could stay black with the TV still in Dolby Vision; a player bug).
+Since v2.0.0 (beta): in TV-led Dolby Vision the TV gets the film's metadata as authored: CM 2.9 (L1 above the
+mastering level, positive lift, the active area L5) and CM 4.0 (L3, L8, L9, L11, L254), which the player lost on
+the way; subtitles and menus in the black bars stay visible (player bugs, for every Dolby Vision source).
 
 Also: better subtitles (anti-aliased, thicker outline with black, grey colours for HDR/DV) and a factory menu
 shortcut (Setup > Playback Setup, cursor on Gapless Playback, press 0 0 0 0), for the player programs of every

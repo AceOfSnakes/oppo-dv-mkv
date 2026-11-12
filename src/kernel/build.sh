@@ -53,3 +53,21 @@ H=$(od -An -v -tx1 build/dvexit.bin | tr -d ' \n')
 [ $(stat -c %s build/arflag.bin) -le $((0x7e94d6c4 - 0x7e94d680)) ] || { echo "arflag.S runs into dvexit.S"; exit 1; }
 [ $(stat -c %s build/dvexit.bin) -le $((0x7e94d724 - 0x7e94d6c4)) ] || { echo "dvexit.S does not fit its cave"; exit 1; }
 echo "dvexit.sh stub matches dvexit.S"
+# dvcm.sh carries its bdpdrv1 stub as hex, without the last six words (data addresses, which the script reads from
+# the driver on the player): rebuild it from dvcm.S (cave = parse_cmd_line_option, RU addresses) and compare; the
+# hook words in the script must be the branches to the stub's entry points
+zig cc -target arm-freestanding-eabi -mcpu=cortex_a9 -marm -c dvcm.S -o build/dvcm.o
+ld.lld -static -Ttext=0x7eb53688 --defsym read_u_v=0x7eb46690 --defsym ext_skip=0x7eb48648 --defsym list_ret=0x7eb48358 --defsym read_ue_v=0x7eb46310 \
+  --defsym read_u_1=0x7eb4692c --defsym get_fixed_metadata=0x7eb55de4 --defsym send_ret=0x7eb3ece4 --defsym update_md_for_hdmi=0x7eb55f9c \
+  -e c4_reset build/dvcm.o -o build/dvcm.elf
+llvm-objcopy -O binary -j .text build/dvcm.elf build/dvcm.bin
+H=$(od -An -v -tx1 build/dvcm.bin | tr -d ' \n')
+[ "$H" = "$(sed -n 's/^STUB=//p' dvcm.sh)ac0ade7ef0bbd27ee845ea7e4017de7e2c56de7e1411de7e" ] || { echo "dvcm.sh STUB does not match dvcm.S"; exit 1; }
+[ $(stat -c %s build/dvcm.bin) -le $((0x7eb53f08 - 0x7eb53688)) ] || { echo "dvcm.S does not fit its cave"; exit 1; }   # the part of the function that is the same in every build
+for h in 0x7eb5512c:c4_l5:eb 0x7eb3ece0:c4_send:ea 0x7eb55134:c4_fixed:eb 0x7eb43eb0:c4_copy:ea 0x7eb48354:c4_list2:ea 0x7eb48630:c4_ext:ea 0x7eb4834c:c4_reset:eb; do
+  s=${h%%:*}; n=${h#*:}; n=${n%%:*}; d=0x$(llvm-nm build/dvcm.elf | awk -v n=$n '$3==n{print $1}')
+  o=$(( (d - s - 8) >> 2 & 0xffffff ))
+  w=$(printf '%02x%02x%02x%s' $((o & 255)) $((o >> 8 & 255)) $((o >> 16 & 255)) ${h##*:})
+  grep -q "^H=.*$s:[0-9a-f]*:$w" dvcm.sh || { echo "dvcm.sh hook word for $n ($s) is not $w"; exit 1; }
+done
+echo "dvcm.sh stub matches dvcm.S"

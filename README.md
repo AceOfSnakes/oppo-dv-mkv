@@ -101,6 +101,13 @@ so that the picture is exactly 2.20:1. The player stretched them to almost 16:9:
 This is the player's own bug (also on stock firmware and without Dolby Vision); the fix is part of the Dolby Vision
 MKV fix. See [fix 13](#13-non-square-pixels-stretched-to-169-v170).
 
+**Since v2.0.0 (beta):** in TV-led Dolby Vision the TV gets the metadata of the film as it was authored. The Oppo
+lost part of it on the way to the TV: the active area (L5), brightness values above the mastering display's (L1),
+positive lift (L2), and everything Dolby added with CM 4.0 (L3, L8, L9, L11, L254). The same file looked different
+through the Oppo than played by the TV itself. In our tests on an LG C1 it now measures the same on every test
+shot. This is Oppo's driver, for every Dolby Vision source, not only MKV. See
+[fix 24](#24-tv-led-dolby-vision-metadata-lost-on-the-way-to-the-tv-cm-29-and-cm-40-v200).
+
 ## Oppo bugs fixed: subtitles and picture
 
 While making MKV and MP4 files play properly, a number of bugs in Oppo's own firmware turned up. All of them are
@@ -120,6 +127,8 @@ MKV fix, and every place is checked before it is written.
 | 📺 | **4:3 picture stretched to 16:9** by the TV in Source Direct | SD H.264 in MKV (576 and 480 lines) | ✅ flagged 4:3, bars left and right | v1.9.0 | [fix 22](#22-wrong-43--169-flag-for-sd-files-in-source-direct-v190) |
 | 📺 | **16:9 picture squeezed to 4:3** by the TV in Source Direct | SD H.264 and HEVC in M2TS and MP4 | ✅ flagged 16:9, full width | v1.9.0 | [fix 22](#22-wrong-43--169-flag-for-sd-files-in-source-direct-v190) |
 | ⬛ | **Black home menu and screen saver after a Dolby Vision film**, TV still in Dolby Vision, with Output Resolution on Source Direct | any Dolby Vision file | ✅ back to the normal menu | v2.0.0 | [fix 23](#23-dolby-vision-stays-on-after-playback-black-menu-v200) |
+| 🌗 | **Dolby Vision picture not as graded in TV-led mode**: lifted shadows not lifted, very bright scenes mapped as if dimmer, trims ignored | Dolby Vision with CM 2.9 metadata (L1 above the mastering level, positive L2 lift, L5) | ✅ same as the TV's own player | v2.0.0 | [fix 24](#24-tv-led-dolby-vision-metadata-lost-on-the-way-to-the-tv-cm-29-and-cm-40-v200) |
+| 🌗 | **CM 4.0 metadata never reaches the TV** (the TV falls back to the CM 2.9 trims) | Dolby Vision with CM 4.0 metadata (L3, L8, L9, L11, L254) | ✅ sent to the TV | v2.0.0 | [fix 24](#24-tv-led-dolby-vision-metadata-lost-on-the-way-to-the-tv-cm-29-and-cm-40-v200) |
 | 🙈 | **No subtitles at all** in most ordinary MP4 films | MP4 with 2+ audio and 2+ subtitle tracks, or big low-bitrate files | ✅ shown | v1.8.0 | [fix 15](#15-mp4-subtitles-hidden-by-the-bad-interleave-mode-v180) |
 | 🔤 | **MP4 text subtitles not shown**, no languages in the menus | MP4 with `tx3g` / `mov_text` | ✅ shown, languages listed | v1.8.0 | [fix 16](#16-mp4-text-subtitles-languages-and-the-8-tracks-v180) |
 | 📐 | **Picture stretched to almost 16:9**, bars too thin | films with slightly non-square pixels (e.g. 3840x1744) | ✅ right bars | v1.7.0 | [fix 13](#13-non-square-pixels-stretched-to-169-v170) |
@@ -447,6 +456,21 @@ are not.
   them. ffmpeg writes both.
 - **MKVs edited in place so that their track list moved to the end of the file** (mkvpropedit does this when the new
   values do not fit) do not play at all on this player, also on stock firmware. Remux them with mkvmerge.
+- **TV-led Dolby Vision metadata (v2.0.0 beta,
+  [fix 24](#24-tv-led-dolby-vision-metadata-lost-on-the-way-to-the-tv-cm-29-and-cm-40-v200)):**
+  - Measured on one TV (LG C1) and one player (RU firmware). On the other firmware builds the patch was only
+    simulated on driver dumps. Other TVs may use the metadata differently.
+  - **A grey strip in the black bar while a subtitle or menu is shown there.** A TV blanks everything outside the
+    film's active area (L5), also what the player draws, so the area is widened to take in subtitles, the info bar
+    and menus that reach into the bars. In scenes whose metadata lifts the blacks, the rows of the bar that such a
+    graphic occupies are lifted with the picture, across the full width, for as long as it is shown. The rest of
+    the bars stays black and the picture itself never changes. Subtitles that sit inside the picture cause nothing.
+  - Subtitles and menus in the bars were checked with text subtitles (also moved down into the bar), the info bar
+    and the option menu. VobSub
+    and PGS subtitles are handled by the same code but were not looked at in a Dolby Vision file.
+  - Output resolutions other than 1920x1080 and 3840x2160: the active area is sent without the widening.
+  - L10 (CM 4.0 target display) is passed on, but no test file had it.
+  - Player-led (LLDV) mode is not changed: there the player does the mapping, with its CM 2.9 code.
 - **Player-led (LLDV) mode** was not tested.
 - At the exact point of a **seek** or a fast-forward step, one or two enhancement-layer pictures may fail to decode.
   This is invisible in practice, and the base layer and audio are unaffected.
@@ -463,7 +487,7 @@ are not.
 - **MKV DV stopped working after a firmware update.** The patches only apply to the firmware they were made for, so
   the patcher logs a mismatch and does nothing.
 - **Check that it is active:** `dvmkv.log` on the player should contain `dvhook: dvhook ON`, `p7kel: p7kel ON`,
-  `bgfix: on (on)` (since v1.6.0), `sarfix: on (on)`, `arflag: on (on)` (since v1.9.0), `dvexit: on (on)` (since v2.0.0), `hvccfix: on (on)` and `dvhook: empty hvcC (no VPS/SPS/PPS):
+  `bgfix: on (on)` (since v1.6.0), `sarfix: on (on)`, `arflag: on (on)` (since v1.9.0), `dvexit: on (on)` (since v2.0.0), `dvcm: on (on)` (since v2.0.0), `hvccfix: on (on)` and `dvhook: empty hvcC (no VPS/SPS/PPS):
   DV allowed` (since v1.7.0), `dvhook: MP4 language list: ...` (since v1.8.0) and `boot marked healthy`.
 
 ## What was broken, and how it was fixed
@@ -881,6 +905,45 @@ marker is already clear, no Dolby Vision source or video path is left and the HD
 code is the same in every firmware we have (RU, USA, Cambridge CXUHD); the HDMI code it reads from sits at a
 different address in each, which `dvexit.sh` finds on the player.
 
+### 24. TV-led Dolby Vision metadata lost on the way to the TV, CM 2.9 and CM 4.0 (v2.0.0)
+
+In TV-led Dolby Vision the player does not touch the picture. It sends it to the TV together with the film's
+metadata, frame by frame, and the TV does the mapping to its panel. So the picture should be the one the TV shows
+when it plays the same file itself.
+
+**Symptom:** it was not. With test films made for this (one metadata change per shot, measured on an LG C1 against
+the C1's own player):
+
+| Metadata | Through the Oppo, stock |
+|---|---|
+| L1 (brightness of the scene) with a maximum above the mastering display's | replaced by the player's own values, the scene is mapped as if it were dimmer |
+| L2 trim: positive lift (offset above neutral) | no effect |
+| L2 trim: slope, power, saturation, chroma weight, negative lift | right |
+| L5 (active area, the film without its black bars) | not sent |
+| CM 4.0: L3, L8 (the trims that replace L2), L9, L11, L254 | not sent, the TV uses the CM 2.9 trims |
+
+**Cause:** three places in Oppo's video driver, in the code that prepares the metadata for HDMI. It drops L5. It
+overwrites L1 with limits of its own when the scene is brighter than the mastering display. It cuts positive lift
+when the film has L5 bars; and the C1 honours positive lift only for a film that sends L5, so no lift ever got
+through. Apart from that the driver's reader only knows the CM 2.9 blocks: the CM 4.0 blocks sit in a second list
+of the same metadata packet that the driver never reads.
+
+**Fix** (`dvcm.sh`, part of the Dolby Vision MKV fix):
+
+- three instructions in the driver so L1, L2 and L5 go out as authored;
+- a reader for the second list: L3, L8, L9, L10, L11 and L254 are appended to the metadata sent to the TV;
+- **L5 for the picture the player really sends.** L5 counts in pixels of the film; the player adds its own bars
+  (a 3840x1600 file), scales (a 1080p file) or zooms, so the numbers are converted to the output frame;
+- **subtitles, info bar and menus in the bars.** A TV blanks everything outside the L5 area, including what the
+  player draws there. The patch looks at what the player's graphics planes show outside the area, at every frame,
+  and widens the area to take that in, only on the side and only as far as needed. L5 is always sent, so the
+  picture does not change when a subtitle appears (see [limitations](#known-limitations) for the one visible
+  side effect).
+
+The patched code is at the same place in every firmware we have a dump of (RU, USA, a third build, Cambridge
+CXUHD); `dvcm.sh` reads the six data addresses it needs from the driver on the player and checks everything it
+relies on before writing. Details: [docs/TECHNICAL.md](docs/TECHNICAL.md), Part 2c-4.
+
 ## Tests
 
 All tests were run on one Oppo UDP-203 with the RU 65-0131 jailbreak, connected through an AV receiver to a Dolby
@@ -1106,6 +1169,35 @@ IP control and the TV's picture was grabbed (a black menu reads as an all-black 
 
 Not tested: low latency (player-led) Dolby Vision, Dolby Vision discs, other TVs.
 
+### TV-led Dolby Vision metadata (v2.0.0)
+
+LG C1, TV-led Dolby Vision, RU player. Eight test files made with dovi_tool: the same test pattern (grey steps,
+ramps, colour steps) in 6-second shots, each shot with one change in the metadata. Each shot was grabbed from the
+TV and the flat patches measured. The reference is the same video stream played by the C1's own player from an
+MP4 copy.
+
+| Test | Result |
+|---|---|
+| Stock driver, CM 2.9 files: L1 maximum above the mastering level; L2 positive lift; L5 | differs from the TV's own player (see the table in fix 24) |
+| Stock driver, CM 4.0 file: L3, L8 | no effect, the L2 trims are used |
+| With the patch, CM 2.9: L1 (two mastering levels, 12 shots), L2 (14 shots), L5 (5 shots), L5 with lift (4 shots) | every shot within 3 of 255 of the TV's own player |
+| With the patch, CM 4.0 (13 shots: L8 lift, saturation, mid contrast, clip trim and a saturation vector; L8 against L2; L3; L9) | every shot within 3 of 255 |
+| With the patch, L5 geometry: a 1080p file and a 3840x1600 file (7 shots each) | every shot within 3 of 255, bars black |
+| Subtitle whose descenders reach into the bottom bar, L5 bars | shown complete, the bar black around it |
+| Info bar, L5 bars | complete, top and bottom |
+| Option menu, L5 bars | complete; only the top bar is widened, the bottom bar stays black |
+| L5 bars and positive lift, no graphics | bars black, lift applied |
+| Subtitles moved down with the player's subtitle shift, second line entirely in the bottom bar | shown complete, the bar black around it |
+| Installed persistently, after a reboot | `dvcm: on (on)` in the boot log; all eight test files measured again, every shot within 3 of 255 |
+| `dvcm.sh` on the player: check, on, off, on; switched on over an older build of the patch | all right |
+| CPU load of the per-frame look at the graphics planes | player 98% idle during playback with subtitles |
+| The metadata reader in an ARM emulator on every packet of the CM 4.0 file, against dovi_tool's decode | every block identical; the CM 2.9 blocks unchanged |
+| The L5 code in an ARM emulator, 28 cases (scaling, bars, zoom, graphics on each side, three pixel formats, bad addresses) | all as expected |
+| `dvcm.sh` on the driver images of every player we have a dump of (RU, several USA players, the +0x50 build, Cambridge CXUHD), simulated, and both emulator tests on each patched image | check, on, off and status work in all of them, off gives back the original bytes, `p7kel.sh` still fits, all emulator cases pass |
+
+Not tested: other TVs, players other than the RU one (simulated only), Dolby Vision discs, VobSub / PGS subtitles
+in the bars of a Dolby Vision file, L10.
+
 ### Extras (v1.7.1)
 
 | Test | Result |
@@ -1203,6 +1295,7 @@ program if that file exists. The installer puts there:
 /mnt/ubi_boot/oppo-dv-mkv/sarfix.sh   kernel patch, non-square pixels stretched to 16:9 (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/arflag.sh   kernel patch, 4:3 / 16:9 flag of SD files in Source Direct (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/dvexit.sh   kernel patch, Dolby Vision left on after playback, black menu (on|off|status|check)
+/mnt/ubi_boot/oppo-dv-mkv/dvcm.sh     kernel patch, TV-led Dolby Vision metadata: CM 2.9, CM 4.0, L5 (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/hvccfix.sh  kernel patch, MKVs without VPS/SPS/PPS in the hvcC (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/subs.sh     subtitle patch (one layout per regional v65 player program; check)
 /mnt/ubi_boot/oppo-dv-mkv/image_bdp83.bin  subtitle colour menu image, built at install time, swapped into /res at boot
@@ -1274,13 +1367,25 @@ requests.
 
 ## Changelog
 
-- **v2.0.0 (in progress, not released).**
+- **v2.0.0-beta: the Dolby Vision metadata the TV gets in TV-led mode; black menu after a Dolby Vision film.**
+  A beta: tested on one player (RU) and one TV (LG C1). Both are Oppo's bugs, also on stock firmware.
+  - **TV-led Dolby Vision as authored (CM 2.9):** the driver dropped the active area (L5), replaced L1 when a scene
+    is brighter than the mastering display, and no positive lift (L2) reached the TV's mapping. Three instructions
+    in the video driver.
+  - **CM 4.0:** L3, L8, L9, L10, L11 and L254 are read from the film and sent to the TV. Before, a CM 4.0 film was
+    mapped with its CM 2.9 trims.
+  - **L5 fits the picture the player sends** (its own bars, scaling, zoom), and is widened at every frame to what
+    the player draws outside it, so subtitles, the info bar and menus in the black bars are not blanked by the TV.
+  - All of this is `dvcm.sh`, part of the Dolby Vision MKV fix, every place checked before it is written. It works
+    on every Dolby Vision source in TV-led mode. See
+    [fix 24](#24-tv-led-dolby-vision-metadata-lost-on-the-way-to-the-tv-cm-29-and-cm-40-v200) and the
+    [limitations](#known-limitations).
   - **Black home menu after a Dolby Vision film in Source Direct:** the TV stayed in Dolby Vision after a stop or
     the end of a file and the menu and screen saver were black (a timing fault in Oppo's driver that showed often
     with v1.9.0 installed). A short patch in the video driver (`dvexit.sh`, part of the Dolby Vision MKV fix, every
     place checked before it is written) makes the player leave Dolby Vision. See
     [fix 23](#23-dolby-vision-stays-on-after-playback-black-menu-v200).
-  - Updating from v1.9.0 adds `dvexit.sh` and replaces `dvmkv.sh`.
+  - Updating from v1.9.0 adds `dvexit.sh` and `dvcm.sh` and replaces `dvmkv.sh`.
 
 - **v1.9.0: every subtitle format with every other one; the 4:3 / 16:9 flag in Source Direct.** All of these
   are Oppo's bugs, also on stock firmware; see the table in

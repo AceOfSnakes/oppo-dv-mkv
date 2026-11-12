@@ -692,6 +692,114 @@ Tested with the script on every driver image and the stub's 48-case truth table 
 
 The patch does not bring back a menu that is already black: the next stop does.
 
+## Part 2c-4: bdpdrv1 (TV-led Dolby Vision metadata: CM 2.9, CM 4.0, L5, `dvcm.sh`, v2.0.0)
+
+Addresses are bdpdrv1 virtual addresses (module at `0x7e8d3000`), data addresses those of the RU build.
+
+### The path of the metadata
+
+Per frame, synchronous in `DOVI_Process`:
+
+```
+md_parser_main -> rpu_decoder_get_output
+  dm_data_payload_read            0x7eb480fc   RPU bits -> vdr_dm_data_payload (0x1438 bytes, 255 ext blocks of 0x14)
+  dm_rpu_payload_2_byte_sequence  0x7eb442d8   -> dm metadata buffer (0x1334 bytes: 0x46 header, count, 255 slots of 0x13)
+control_path_main                 0x7eb54dec   commit_reg, then
+  update_md_for_hdmi              0x7eb55f9c   edits the buffer in place for the HDMI side
+get_md_len, Dovi_Core3_HalSetRawMetadata  0x7eb3ebf8   copies length + 5 bytes of every slot to the HDMI raw buffer (0x200)
+```
+
+A slot is a 4-byte length, the level, the payload. In TV-led mode this buffer is what the TV maps the picture with.
+
+### CM 2.9: three instructions in `update_md_for_hdmi`
+
+The function walks the slots (level at slot `+4`):
+
+| Site | Stock | Patched | Effect |
+|---|---|---|---|
+| `0x7eb56394` | `053042e2` `sub r3, r2, #5` | `063042e2` `sub r3, r2, #6` | the test that drops levels 5 and 6 drops only level 6: L5 stays |
+| `0x7eb563b4` | `2e00001a` `bne` | `2e0000ea` `b` | L1 is no longer replaced by the player's own crush / clip values (source maximum above the mastering display's) nor its average clamped |
+| `0x7eb564a8` | `1300001a` `bne` | `130000ea` `b` | positive L2 offset is no longer cut to neutral (2048) when L5 has non-zero offsets |
+
+Measured on an LG C1: without L5 in the metadata the TV ignores positive lift (L2 and L8 offset) altogether; with L5
+it honours it and blanks everything outside the active area; with L5 all zero it honours it for the whole frame.
+
+### CM 4.0: the second extension block list
+
+`dm_data_payload_read` reads one list of extension blocks and knows levels 1, 2, 4, 5, 6 and 255; for any other
+level it counts the block out and skips its bits. A CM 4.0 RPU has a second list after the first (block count
+`ue(v)`, byte alignment, blocks), before the CRC. The driver never reads it, and its structures have no room for
+the longer CM 4.0 blocks (0x14 / 0x13 bytes per block).
+
+The stub (`dvcm.S`) keeps the CM 4.0 blocks in the unused tail of the two buffers, already in the byte layout of the
+HDMI metadata (4-byte length, level, payload; fields above 8 bits as two bytes, big-endian), and appends them
+behind the stock blocks in the HDMI writer:
+
+- payload struct `+0x1200`, metadata buffer `+0x1100`: magic `DM4C`, block count, byte count, at most 0x180 bytes
+  of blocks;
+- field widths per level (bits): L3 12 12 12; L8 8 12×6 12 12 8×12 (as many fields as the block's length holds:
+  payload 13, 15, 17, 23 or 29 bytes); L9 8 16×8; L10 8 12 12 8 16×8; L11 8 8 8 8; L254 8 8.
+
+| Hook | Site | Stock word | What it does |
+|---|---|---|---|
+| `c4_reset` | `0x7eb4834c` | `4a00c5e5` | `dm_data_payload_read`, where the block count is stored: clears the stash for this RPU |
+| `c4_ext` | `0x7eb48630` | `4a30d2e5` | unknown level in the first list: reads the block if it is one of the six, then the stock skip |
+| `c4_list2` | `0x7eb48354` | `140094e5` | at the function's return: reads the second list if at least 8 bits are left |
+| `c4_copy` | `0x7eb43eb0` | `f08fbde8` | return of the struct converter: copies the stash from the payload struct to the metadata buffer |
+| `c4_fixed` | `0x7eb55134` | `2a0300eb` | `control_path_main` calling `get_fixed_metadata` (metadata the driver generates): no blocks of ours |
+| `c4_send` | `0x7eb3ece0` | `d020c7e1` | `Dovi_Core3_HalSetRawMetadata` after its copy loop: appends the stash, raises the block count and the length; nothing if it would pass 0x200 bytes |
+| `c4_l5` | `0x7eb5512c` | `9a0300eb` | `control_path_main` calling `update_md_for_hdmi`: runs it, then rewrites L5 (below) |
+
+### L5 for the output frame
+
+L5 holds four offsets in pixels of the coded picture; the TV applies them to the frame it receives. `c4_l5`
+converts each: the bar the player adds on that side plus (file offset − source crop) × output size / source size,
+rounded up. Source rectangle (x y w h) at video HAL state `0x7ed2bbf0` `+0xa4`, output rectangle at `+0x1bc`,
+output raster at Dolby context `0x7eea45e8` `+0x20` / `+0x24`. With no source rectangle the L5 slot is removed.
+
+### Graphics outside the active area
+
+`c4_gfx` then widens the area to the bounding box of itself and whatever the OSD planes show outside it. OSD canvas
+1920×1080; output raster 1920×1080 or 3840×2160 (anything else: no widening).
+
+- plane n enabled: bit 0 of `0x7ede0aac + 0x100 n`; plane struct `0x7ede1740 + 0x38 n`, region list id at `+0xc`;
+- list n at `0x7ede562c + 0x14 n`, first region at `+4`; region n at `0x7ede562c + 0xe10 + 0xc n`, next at `+8`;
+- region headers, 0x50 bytes: `[0x7ede1114] + 0x50 n` for n < 0x78, `[0x7ede1118] + 0x50 (n − 0x78)` above;
+- header: colour mode = byte 3 >> 4; bitmap (physical) = (word `+4` & 0xffffff) << 4 | bits 7-8 of u16 `+0x1e` << 28
+  | bits 2-3 of byte `+0x18` << 30; pitch = (u16 `+8` & 0x7ff) × 16; width u16 `+0x24`, height `+0x26`, x `+0x2e`,
+  y `+0x2a`; palette = (word `+0xc` & 0x3ffffff) << 4 | bits 4-5 of byte `+0x18` << 30.
+
+During playback the UI plane (0: info bar, menus, PGS of PGS-only files) is one 1920×1080 ARGB8888 surface (mode
+14), the subtitle plane (2) one ARGB4444 surface (mode 13, text subtitles) or 8-bit palette surface (mode 2,
+VobSub, alpha in byte 3 of the palette entry), transparent where nothing is drawn. Every enabled plane, up to four
+regions each, is sampled at every 8th pixel of every 4th row, only in rows and columns outside the active area;
+a pixel with alpha widens that side, with one sampling step of margin. A region in another format counts as drawn
+as a whole. Bitmaps and palettes are read through the kernel's linear mapping (physical + `0x80000000`) and only
+between physical `0x100000` and `0x3f000000`; `dvcm.sh` checks that mapping in the page tables. About half a
+million instructions per frame with two empty planes and 2.40:1 bars.
+
+### The script
+
+The stub is 2148 bytes in `parse_cmd_line_option` (`0x7eb53688`, 2384 bytes), a command line parser of the Dolby
+control path's test harness with no caller in the driver. All the code above is at the same addresses in every
+driver build we have; the data is not (RU 0, USA `+0x90`, a third build `+0x50`, CXUHD `−0x8`), and inside the cave
+function only the first 2176 bytes are the same everywhere, which is why the stub must stay below that. The stub's
+last six words are its data addresses. `dvcm.sh` reads them from literal pools of the driver's own code
+(`_OSD_PLA_GetEnable`, `VDP_HalGetFbAtIsrW`, `dovi_set_out_res`, `OSD_PLA_GetFirstRegion`, `OSD_RGN_LIST_GetHead`,
+`OSD_RGN_GetAdd`) and requires all six to be moved by the same amount.
+
+Checked before anything is written: the words around every site, the first words of every function and join the
+stub branches to, the instructions that load the six addresses and the region header getters (field offsets), the
+kernel's linear mapping, every site (stock or hooked) and the cave (stock or this stub). A driver with hooks into
+the cave and other cave contents is another version of this patch (`other`): `on` first restores stock. `on` writes
+the cave, then the hooks (the reset hook last, without it the others find no magic and do nothing), then the three
+CM 2.9 words; `off` goes the other way and restores the cave. `build.sh` assembles `dvcm.S`, compares it with the
+hex in the script plus the RU addresses, checks the hook words against the stub's symbols and that it fits.
+
+Tested: the script on every driver image; on each patched image the L5 code in an emulator (28 cases) and the
+parser, converter and HDMI writer on every RPU of a CM 4.0 file against `dovi_tool`'s decode; on the RU player
+against the TV's own player (README, Tests).
+
 ## Part 2d: audio DSP decoders (`bdpaudec.db`, v1.7.0)
 
 `bdpdrv.ko` loads the audio DSP's decoder from `/res/bdpaudec.db` at the start of every playback
