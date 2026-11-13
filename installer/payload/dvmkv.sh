@@ -14,10 +14,15 @@ log "player pid $P"
 [ -f $D/p7kel.sh ] && sh $D/p7kel.sh on 2>&1 | while read l; do log "p7kel: $l"; done     # profile 7 decoder fixes (kernel)
 [ -f $D/bgfix.sh ] && sh $D/bgfix.sh on 2>&1 | while read l; do log "bgfix: $l"; done     # black letterbox bars in Dolby Vision (kernel)
 [ -f $D/sarfix.sh ] && sh $D/sarfix.sh on 2>&1 | while read l; do log "sarfix: $l"; done  # non-square pixels stretched to ~16:9 (kernel)
+[ -f $D/arflag.sh ] && sh $D/arflag.sh on 2>&1 | while read l; do log "arflag: $l"; done  # 4:3 / 16:9 flag of SD pictures in Source Direct (kernel)
+[ -f $D/dvexit.sh ] && sh $D/dvexit.sh on 2>&1 | while read l; do log "dvexit: $l"; done  # Dolby Vision left on after playback, black menu (kernel)
+[ -f $D/dvcm.sh ] && sh $D/dvcm.sh on 2>&1 | while read l; do log "dvcm: $l"; done        # TV-led Dolby Vision: CM 2.9 / CM 4.0 metadata lost on the way to the TV (kernel)
 if [ -f $D/hvccfix.sh ]; then   # MKVs whose hvcC has no VPS/SPS/PPS (kernel); DV is signalled for them only once it is on
   h=$(sh $D/hvccfix.sh on 2>&1); r=$?; echo "$h" | while read l; do log "hvccfix: $l"; done
   [ $r = 0 ] && sh $D/dvhook.sh hvcc on 2>&1 | while read l; do log "dvhook: $l"; done
 fi
+[ -f $D/ftrfix.sh ] && sh $D/ftrfix.sh on 2>&1 | while read l; do log "ftrfix: $l"; done     # hang at the next file after an MP4 with audio was stopped (kernel)
+[ -f $D/mp4elfix.sh ] && sh $D/mp4elfix.sh on 2>&1 | while read l; do log "mp4elfix: $l"; done   # profile 7 MP4s that stop after a second (kernel)
 if [ -f $D/dvhook.sh ] && [ -f $D/languages.txt ]; then   # MP4: which 8 audio/subtitle tracks to keep (languages.txt)
   c=$(tr -d '\r' < $D/languages.txt | grep -v '^[[:space:]]*#' | awk 'NF{print $1}')
   [ -n "$c" ] && sh $D/dvhook.sh langs $c 2>&1 | while read l; do log "dvhook: $l"; done

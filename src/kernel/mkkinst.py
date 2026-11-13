@@ -38,7 +38,7 @@ assert all(CAVE + len(x) == CAVE_END for x in blobs.values())
 # and of the second cave (_Cmd_ImgResz_TestPerformance, also a CLI-only test function): code part, counters
 ORIG_MD5 = {0x7e98be80: '20fda5a2aa0c88fd07884b2b3364eea1', 0x7e98c000: '829543b6531490f4e7bf9c18348de5f8',
             0x7e98c748: '11a4b898f069093cc19eb1dee12733fd',
-            0x7e94d210: 'ceebe1171726ede7babd38ff302cfedc', 0x7e94d3d0: '41c64f39634afe69ec14047ee05e12a7'}
+            0x7e94d210: 'b16166a0a7ebcc45c08876b03ee1b3d7', 0x7e94d418: '52b5dcb2324ccec82effda6543f16303'}
 CAVE2 = 0x7e94d210
 syms = {}
 nm = lambda n: subprocess.run(['llvm-nm', f'{D}/build/elfix-{n}.elf'], capture_output=True, text=True).stdout
@@ -47,7 +47,7 @@ for l in nm('ru').split('\n'):
     p = l.split()
     if len(p) == 3: syms[p[2]] = int(p[0], 16)
 C2DATA, CAVE2_END = syms['c2stat'], CAVE2 + len(blobs2['ru'])
-assert all(len(x) == CAVE2_END - CAVE2 for x in blobs2.values()) and C2DATA + 16 == CAVE2_END
+assert all(len(x) == CAVE2_END - CAVE2 for x in blobs2.values()) and C2DATA + 20 == CAVE2_END
 # (start, end, code?): cave 1 page part / code / data (elstat), cave 2 code / data (c2stat). Code chunks are compared to
 # tell "already installed"; data chunks hold counters that change at run time.
 chunks = [(0x7e98be80, 0x7e98c000, 1), (0x7e98c000, 0x7e98c748, 1), (0x7e98c748, 0x7e98c7c0, 0),
@@ -105,7 +105,10 @@ sites = [  # (VA, original instruction, patched instruction)
 # patch takes over at the next boot.
 OLD_PATCHED = [(0x7eaac99c, '577dfbea'), (0x7eb26d9c, 'f495f9eb'), (0x7eb215cc, '12acf9eb'),
                (0x7eaac99c, '5e7dfbea'), (0x7eac8954, '2d12faeb'), (0x7eb26968, '2e9af81a'), (0x7e9b60cc, '685cfeeb'),
-               (0x7e9be5a0, '443bfeea'), (0x7eabb880, '9f46faeb')]
+               (0x7e9be5a0, '443bfeea'), (0x7eabb880, '9f46faeb'),
+               # v1.4.0 .. v2.0.0-beta (the second-cave stubs after vdp_gate moved in v2.0.1-beta)
+               (0x7eac8954, '3712faeb'), (0x7eb26968, '3c9af81a'), (0x7e9b60cc, '7b5cfeeb'), (0x7e9be5a0, '5f3bfeea'),
+               (0x7eabb880, 'bc46faeb')]
 # Fingerprint of the bdpdrv1 module the blob was built for (read-only check before anything is written):
 # continuation instructions after each hook and entry words of the module functions the blob calls. The ANCHORS then
 # give the data offset of the driver build.
@@ -191,7 +194,7 @@ out += ['  cave',
  '  for e in $SITES; do a=${e%%:*}; r=${e#*:}; c=$(rdm $a 4); { [ "$c" = "${r#*:}" ] || case " $OLD " in *" $a:$c "*) true;; *) false;; esac; } && wrm $a "$(esc ${r%%:*})"; done',
  '  echo "p7kel OFF";;',
  'esac',
- 'echo "sites=$(state) stat=$(rdm %#x 32) seek=$(rdm %#x 16)"' % (STAT, C2DATA), '']
+ 'echo "sites=$(state) stat=$(rdm %#x 32) seek=$(rdm %#x 20)"' % (STAT, C2DATA), '']
 os.makedirs(f'{D}/build', exist_ok=True)
 open(f'{D}/build/p7kel.sh', 'w').write('\n'.join(out))
 print('build/p7kel.sh', [(hex(v), p.hex()) for v, _, p in sites])

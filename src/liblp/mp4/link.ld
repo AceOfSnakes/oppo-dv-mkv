@@ -13,6 +13,13 @@ stsd_drop   = 0x4291d8;   /* vMP4STSDHandle: rest of "drop this subtitle track" 
 stsd_next   = 0x428018;   /* vMP4STSDHandle: next state (the 'stpp' path goes here) */
 mrSetSpPalette = 0x4ee5e8; /* CLpMovieMpcWrapper::mrSetSpPalette(uchar*, ulong) */
 mrMPC1ProcSetSpPltInStopSt = 0x5550c8; /* MPC1 command 0x15 handler, state 0 */
+pgdone_cont = 0x58abe0;   /* SpsTsPgDataConsumedCb + 4 */
+mkv_same_sw  = 0x3e0b90;  /* mrChangeSpStNo: same track, subtitle switched on */
+mkv_same_chg = 0x3e07e8;  /* mrChangeSpStNo: full stream change */
+sps_scr_open = 0x57e380;  /* mrSpsInitScreenPlane: open the screen and plane */
+sps_scr_none = 0x57e370;  /* mrSpsInitScreenPlane: "do not init screen for TS" */
+TSFile_TimeExpired = 0x163f8c; /* .plt */
+TSFile_Start = 0x14b4d0;       /* .plt */
 SECTIONS {
   . = 0x530de8;            /* vMPCTestDvdRwdSpeedThr, 0x9e4 bytes: moov pre-scan */
   .cave3 : { *(.text.cave3) }

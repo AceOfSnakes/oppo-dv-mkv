@@ -13,6 +13,11 @@ option, and grey text colours for comfortable, dimmer subtitles on HDR and Dolby
 subtitles, chapters, a language list for files with many tracks, and a fix for a bug in Oppo's own code that hid
 the subtitles of most ordinary MP4 films. See [MP4 files](#mp4-files-v180).
 
+**Plus fixes for Oppo's own subtitle and picture bugs (v1.9.0):** every subtitle format in an MKV or MP4 can be
+switched to and from every other one (PGS with SRT, ASS and VobSub; VobSub in the right colours and place), PGS
+subtitles keep their timing after a seek, and SD files played in Source Direct reach the TV with the right 4:3 or
+16:9 flag. See [Oppo bugs fixed](#oppo-bugs-fixed-subtitles-and-picture).
+
 ---
 
 > ## ⚠️ DISCLAIMER: READ THIS FIRST
@@ -43,6 +48,7 @@ the subtitles of most ordinary MP4 films. See [MP4 files](#mp4-files-v180).
 
 ## Contents
 - [What it does](#what-it-does)
+- [Oppo bugs fixed: subtitles and picture](#oppo-bugs-fixed-subtitles-and-picture)
 - [Better subtitles](#better-subtitles)
 - [MP4 files (v1.8.0)](#mp4-files-v180)
 - [Factory menu](#factory-menu)
@@ -94,6 +100,76 @@ black bars. Some releases do this, for example films cropped to 3840x1744 with a
 so that the picture is exactly 2.20:1. The player stretched them to almost 16:9: its letterbox maths overflowed.
 This is the player's own bug (also on stock firmware and without Dolby Vision); the fix is part of the Dolby Vision
 MKV fix. See [fix 13](#13-non-square-pixels-stretched-to-169-v170).
+
+**Since v2.0.0 (beta):** in TV-led Dolby Vision the TV gets the metadata of the film as it was authored. The Oppo
+lost part of it on the way to the TV: the active area (L5), brightness values above the mastering display's (L1),
+positive lift (L2), and everything Dolby added with CM 4.0 (L3, L8, L9, L11, L254). The same file looked different
+through the Oppo than played by the TV itself. In our tests on an LG C1 it now measures the same on every test
+shot. This is Oppo's driver, for every Dolby Vision source, not only MKV. See
+[fix 24](#24-tv-led-dolby-vision-metadata-lost-on-the-way-to-the-tv-cm-29-and-cm-40-v200).
+
+**Since v2.0.1 (beta):** three faults around starting and stopping files. A profile 7 MKV could hang at 0:00 when
+it started (a fault of this project's own profile 7 patch, there since v1.3.1). The file after a stopped MP4 with
+audio could hang at the loading screen, and profile 7 MP4s from some encoders stopped after a second (both Oppo's,
+also on stock firmware). See [fix 25](#25-player-hangs-at-the-next-file-after-an-mp4-was-stopped-v201), [fix 26](#26-profile-7-mp4-stops-a-second-after-it-starts-v201)
+and the [changelog](#changelog).
+
+## Oppo bugs fixed: subtitles and picture
+
+While making MKV and MP4 files play properly, a number of bugs in Oppo's own firmware turned up. All of them are
+also there on stock firmware, without oppo-dv-mkv. They are fixed in RAM at every boot, as part of the Dolby Vision
+MKV fix, and every place is checked before it is written.
+
+### Everything fixed, at a glance
+
+| | What you saw on the Oppo | Files | Now | Since | Details |
+|:-:|---|---|---|:-:|:-:|
+| 💬 | **PGS subtitles never appear** when chosen after playback started on a text or VobSub subtitle | MKV with PGS and other subtitle types | ✅ shown, at the right time | v1.9.0 | [fix 20](#20-pgs-subtitles-together-with-other-subtitle-types-v190) |
+| 💬 | **Nothing appears after leaving a PGS track**, and the **last PGS line stays stuck** on screen | MKV that starts on PGS and has other subtitle types | ✅ every type shown, PGS line cleared | v1.9.0 | [fix 20](#20-pgs-subtitles-together-with-other-subtitle-types-v190) |
+| ⏱️ | **PGS lines flash by or are lost after a seek**; lines appear as soon as they are read, not at their time | the same MKVs, on the PGS track | ✅ on and off at their times, also after seeks | v1.9.0 | [fix 21](#21-pgs-subtitle-timing-and-seeks-v190) |
+| 🎨 | **VobSub subtitles dark green** after switching to them from another subtitle | MKV with VobSub and other subtitle types | ✅ right colours | v1.8.1 | [fix 18](#18-mkv-vobsub-subtitles-green-or-black-v181) |
+| 🎨 | **VobSub subtitles black**, even when playback starts on them | MKV with VobSub and an ASS track | ✅ right colours | v1.8.1 | [fix 18](#18-mkv-vobsub-subtitles-green-or-black-v181) |
+| ↕️ | **VobSub subtitles far too high** on the screen | MP4 with VobSub from NTSC DVDs (720x480) | ✅ in their place, and they stay there (v1.9.0) | v1.8.1 | [fix 19](#19-mp4-vobsub-subtitles-too-high-v181) |
+| 📺 | **4:3 picture stretched to 16:9** by the TV in Source Direct | SD H.264 in MKV (576 and 480 lines) | ✅ flagged 4:3, bars left and right | v1.9.0 | [fix 22](#22-wrong-43--169-flag-for-sd-files-in-source-direct-v190) |
+| 📺 | **16:9 picture squeezed to 4:3** by the TV in Source Direct | SD H.264 and HEVC in M2TS and MP4 | ✅ flagged 16:9, full width | v1.9.0 | [fix 22](#22-wrong-43--169-flag-for-sd-files-in-source-direct-v190) |
+| ⬛ | **Black home menu and screen saver after a Dolby Vision film**, TV still in Dolby Vision, with Output Resolution on Source Direct | any Dolby Vision file | ✅ back to the normal menu | v2.0.0 | [fix 23](#23-dolby-vision-stays-on-after-playback-black-menu-v200) |
+| 🌗 | **Dolby Vision picture not as graded in TV-led mode**: lifted shadows not lifted, very bright scenes mapped as if dimmer, trims ignored | Dolby Vision with CM 2.9 metadata (L1 above the mastering level, positive L2 lift, L5) | ✅ same as the TV's own player | v2.0.0 | [fix 24](#24-tv-led-dolby-vision-metadata-lost-on-the-way-to-the-tv-cm-29-and-cm-40-v200) |
+| 🌗 | **CM 4.0 metadata never reaches the TV** (the TV falls back to the CM 2.9 trims) | Dolby Vision with CM 4.0 metadata (L3, L8, L9, L11, L254) | ✅ sent to the TV | v2.0.0 | [fix 24](#24-tv-led-dolby-vision-metadata-lost-on-the-way-to-the-tv-cm-29-and-cm-40-v200) |
+| ⏳ | **Player hangs at the loading screen** (50 / 75 / 100 %) of the next file, until it is power-cycled | any file started after an MP4 with audio was stopped | ✅ starts | v2.0.1 | [fix 25](#25-player-hangs-at-the-next-file-after-an-mp4-was-stopped-v201) |
+| ⏹️ | **Playback stops about a second after it starts** | Dolby Vision profile 7 MP4 (both layers in one track) from x265, several frames per chunk | ✅ plays, with FEL | v2.0.1 | [fix 26](#26-profile-7-mp4-stops-a-second-after-it-starts-v201) |
+| 🙈 | **No subtitles at all** in most ordinary MP4 films | MP4 with 2+ audio and 2+ subtitle tracks, or big low-bitrate files | ✅ shown | v1.8.0 | [fix 15](#15-mp4-subtitles-hidden-by-the-bad-interleave-mode-v180) |
+| 🔤 | **MP4 text subtitles not shown**, no languages in the menus | MP4 with `tx3g` / `mov_text` | ✅ shown, languages listed | v1.8.0 | [fix 16](#16-mp4-text-subtitles-languages-and-the-8-tracks-v180) |
+| 📐 | **Picture stretched to almost 16:9**, bars too thin | films with slightly non-square pixels (e.g. 3840x1744) | ✅ right bars | v1.7.0 | [fix 13](#13-non-square-pixels-stretched-to-169-v170) |
+| 🔊 | **192 kHz ALAC crackles** | Apple-encoded ALAC | ✅ clean | v1.7.0 | [changelog](#changelog) |
+| ⬛ | **Grey bars** around a Dolby Vision picture | films that do not fill the screen | ✅ black | v1.6.0 | [fix 11](#11-grey-letterbox-bars-in-dolby-vision-v160) |
+
+### Subtitle formats: start on any, switch to any
+
+With oppo-dv-mkv v1.9.0, tested on the TV's picture with files that carry every format at once:
+
+| Container | Start on ↓ / switch to → | SRT | ASS | PGS | VobSub | `tx3g` |
+|---|---|:-:|:-:|:-:|:-:|:-:|
+| **MKV** | SRT or ASS | ✅ | ✅ | ✅ *new* | ✅ *v1.8.1* | n/a |
+| **MKV** | PGS | ✅ *new* | ✅ *new* | ✅ | ✅ *new* | n/a |
+| **MKV** | VobSub | ✅ | ✅ | ✅ *new* | ✅ | n/a |
+| **MP4** | `tx3g` | n/a | n/a | n/a | ✅ | ✅ *v1.8.0* |
+| **MP4** | VobSub | n/a | n/a | n/a | ✅ | ✅ |
+
+On stock firmware every cell marked *new* shows nothing, the *v1.8.1* cell is dark green, and the *v1.8.0* cell
+shows nothing. Files whose subtitles are all PGS (typical Blu-ray remuxes) always worked and play exactly as
+before. What is left is listed under [Known limitations](#known-limitations).
+
+### SD files in Source Direct
+
+With Output Resolution set to Source Direct, a 576 or 480-line file is sent to the TV as it is, with a flag that says
+whether the picture is 4:3 or 16:9. The player set that flag by the kind of file, not by the picture:
+
+| File (SD, Source Direct) | Stock | With oppo-dv-mkv v1.9.0 |
+|---|---|---|
+| 4:3 H.264 in MKV | ❌ flagged 16:9: stretched | ✅ 4:3 |
+| 16:9 H.264 in M2TS or MP4, 16:9 HEVC in M2TS | ❌ flagged 4:3: squeezed | ✅ 16:9 |
+| 4:3 H.264 in M2TS or MP4, 16:9 H.264 in MKV, HEVC in MKV | ✅ | ✅ unchanged |
+| MPEG-2 (DVD video) in MKV or M2TS, 4:3 and 16:9 | ✅ | ✅ unchanged |
 
 ## Better subtitles
 
@@ -367,14 +443,15 @@ are not.
   stream) makes them work there.
 - **MP4 files with Dolby Vision:** profile 8 (`dvvC`) plays in Dolby Vision since v1.8.0, and a single-track
   profile 7 FEL MP4 was tested too. Other MP4 variants (dual-track, profile 5) are untested.
-- **Switching between PGS and other subtitle types in MKV (Oppo's bug, not caused by oppo-dv-mkv; also on stock
-  firmware).** When a file is opened, the player decides once who draws its subtitles: if playback starts on a PGS
-  (Blu-ray picture) track, the PGS data goes to the player program, which draws PGS only; otherwise Oppo's subtitle
-  decoder draws text and VobSub subtitles, and a PGS track chosen later reaches a Blu-ray graphics routine that never
-  shows it. So switching from SRT, ASS or VobSub to PGS shows nothing, and switching from PGS to another type shows
-  nothing and leaves the last PGS line on screen. Stopping and playing again or seeking does not help. The track the
-  player starts on is chosen by the subtitle **language** in the player's setup, not by the track order or the default
-  flag. Files whose subtitles are all PGS (typical Blu-ray remuxes) are not affected. A fix is being investigated.
+- **PGS subtitles in MKVs that also have other subtitle types** work since v1.9.0
+  ([fix 20](#20-pgs-subtitles-together-with-other-subtitle-types-v190)). What is left: after a **seek into the
+  middle of a PGS line**, that line is not shown; the next one is. Right after a switch to PGS the first line can be
+  missed in the same way. The track the player starts on is chosen by the subtitle **language** in the player's
+  setup, not by the track order or the default flag.
+- **PGS in M2TS/TS files** is untouched: in one test file the player (stock too) showed PGS only from about 20 s
+  after the start.
+- **MP4: a subtitle switch late in a very short file** showed nothing for the rest of the file in a 1-minute test
+  clip (switches after about 20 s; the same on v1.8.1). In a 10-minute file switches worked. Not understood yet.
 - **MP4 VobSub tracks written by ffmpeg** show wrong colours (or nothing, when ffmpeg copied a high-resolution bitmap
   track): ffmpeg stores the palette as text, where MP4 players expect the binary palette that MP4Box and HandBrake
   write. Put VobSub subtitles in an MKV, or mux the MP4 with MP4Box.
@@ -387,6 +464,21 @@ are not.
   them. ffmpeg writes both.
 - **MKVs edited in place so that their track list moved to the end of the file** (mkvpropedit does this when the new
   values do not fit) do not play at all on this player, also on stock firmware. Remux them with mkvmerge.
+- **TV-led Dolby Vision metadata (v2.0.0 beta,
+  [fix 24](#24-tv-led-dolby-vision-metadata-lost-on-the-way-to-the-tv-cm-29-and-cm-40-v200)):**
+  - Measured on one TV (LG C1) and one player (RU firmware). On the other firmware builds the patch was only
+    simulated on driver dumps. Other TVs may use the metadata differently.
+  - **A grey strip in the black bar while a subtitle or menu is shown there.** A TV blanks everything outside the
+    film's active area (L5), also what the player draws, so the area is widened to take in subtitles, the info bar
+    and menus that reach into the bars. In scenes whose metadata lifts the blacks, the rows of the bar that such a
+    graphic occupies are lifted with the picture, across the full width, for as long as it is shown. The rest of
+    the bars stays black and the picture itself never changes. Subtitles that sit inside the picture cause nothing.
+  - Subtitles and menus in the bars were checked with text subtitles (also moved down into the bar), the info bar
+    and the option menu. VobSub
+    and PGS subtitles are handled by the same code but were not looked at in a Dolby Vision file.
+  - Output resolutions other than 1920x1080 and 3840x2160: the active area is sent without the widening.
+  - L10 (CM 4.0 target display) is passed on, but no test file had it.
+  - Player-led (LLDV) mode is not changed: there the player does the mapping, with its CM 2.9 code.
 - **Player-led (LLDV) mode** was not tested.
 - At the exact point of a **seek** or a fast-forward step, one or two enhancement-layer pictures may fail to decode.
   This is invisible in practice, and the base layer and audio are unaffected.
@@ -403,7 +495,7 @@ are not.
 - **MKV DV stopped working after a firmware update.** The patches only apply to the firmware they were made for, so
   the patcher logs a mismatch and does nothing.
 - **Check that it is active:** `dvmkv.log` on the player should contain `dvhook: dvhook ON`, `p7kel: p7kel ON`,
-  `bgfix: on (on)` (since v1.6.0), `sarfix: on (on)`, `hvccfix: on (on)` and `dvhook: empty hvcC (no VPS/SPS/PPS):
+  `bgfix: on (on)` (since v1.6.0), `sarfix: on (on)`, `arflag: on (on)` (since v1.9.0), `dvexit: on (on)` (since v2.0.0), `dvcm: on (on)` (since v2.0.0), `ftrfix: on (on)` and `mp4elfix: on (on)` (since v2.0.1), `hvccfix: on (on)` and `dvhook: empty hvcC (no VPS/SPS/PPS):
   DV allowed` (since v1.7.0), `dvhook: MP4 language list: ...` (since v1.8.0) and `boot marked healthy`.
 
 ## What was broken, and how it was fixed
@@ -737,6 +829,166 @@ index data.
 decoder, with the 480/576-line mode, the way the MKV player does it. PAL (720x576) files were already right and are
 unchanged.
 
+**v1.9.0:** in v1.8.1 the subtitles could still jump back up, for example after a subtitle switch: the MP4 parser
+sets the line mode again by itself (not the size), and the decoder went back to a 576-line view. The mode is now
+applied every time the parser hands out the track's information.
+
+### 20. PGS subtitles together with other subtitle types (v1.9.0)
+
+**Symptom:** in an MKV with PGS (Blu-ray picture) subtitles and other subtitle types, a PGS track chosen during
+playback showed nothing. If playback started on the PGS track, PGS worked, but then every other track showed
+nothing and the last PGS line stayed on screen. Stopping, playing again or seeking did not help. Files with only PGS
+subtitles were fine. Also on stock firmware.
+
+**Cause:** when a file is opened, the player decides once who draws its subtitles. If playback starts on a PGS
+track, the PGS data goes to the player program, which draws PGS and nothing else, and Oppo's subtitle decoder is
+never created. Otherwise the subtitle decoder draws text and VobSub subtitles, and a PGS track chosen later is
+handed to the player program's Blu-ray PGS decoder. That decoder expects the data the way a Blu-ray disc delivers
+it: one PES packet (a small header with the display time) per PGS segment. An MKV block is a whole display set, its
+segments one after another without any packet header, so the decoder threw every block away
+("segment ignored; is not a PCS").
+
+**Fix (`dvhook.sh`):**
+- Every segment of an MKV PGS block is wrapped in its own PES packet, with the block's time, before it goes to the
+  Blu-ray PGS decoder. A PGS track chosen during playback is now drawn.
+- A file that **starts** on a PGS track **and** has other subtitle types is opened with the subtitle decoder, like any
+  other file, so PGS goes the same way from the start and the other tracks can be drawn after a switch. Three places
+  needed it: the choice made at open, the subtitle decoder's screen plane (it was not opened for PGS), and a special
+  case that restarted the whole subtitle stream when the PGS track was selected again and lost the lines already
+  queued.
+- Files whose subtitles are all PGS keep Oppo's own path, unchanged.
+
+### 21. PGS subtitle timing and seeks (v1.9.0)
+
+**Symptom:** with fix 20 alone, PGS lines appeared as soon as they were read from the file instead of at their
+time, and after a seek the first line flashed and vanished.
+
+**Cause:** a units bug in Oppo's code that never showed, because this path never drew anything. The Blu-ray PGS
+decoder counts time in 45 kHz ticks. The subtitle decoder asks it "has this line's time come?" with both the line's
+time and the current time in 90 kHz ticks, so for the PGS decoder the clock ran at double speed and every line was
+already due. And the start time it was given when playback (re)started was the player's clock from before the
+seek.
+
+**Fix (`dvhook.sh`):** both times are halved on their way to the PGS decoder, and it is started with a clock of 0, so
+that only the per-line check decides. Lines now go on and off at their own times, also after forward and backward
+seeks.
+
+### 22. Wrong 4:3 / 16:9 flag for SD files in Source Direct (v1.9.0)
+
+**Symptom:** with Output Resolution set to Source Direct, a 4:3 SD MKV (H.264, 720x576 or 720x480) fills a 16:9
+TV: the player's info screen says 4:3, but the TV is told 16:9. The same video in M2TS or MP4 is right. Reported on
+AVS Forum. The opposite also happens: a 16:9 SD H.264 or HEVC picture in M2TS or MP4 is shown as a 4:3 picture with
+bars left and right.
+
+**Cause:** in Source Direct an SD picture is sent unscaled, and the HDMI signal carries a 4:3 / 16:9 flag (in the AVI
+InfoFrame). The video driver takes that flag from a table, by the kind of aspect-ratio information the file gave,
+not by the ratio itself. A ratio from the container (H.264 in MKV) always gives 16:9, and no aspect-ratio code at all
+(H.264 and HEVC in M2TS and MP4, HEVC in MKV) always gives 4:3. MPEG-2 has its own codes for 4:3 and 16:9 and is
+right in every container.
+
+**Fix:** a short patch in the video driver (`arflag.sh`, part of the Dolby Vision MKV fix), only for this case (SD
+picture sent unscaled, ratio from the container or no code): it looks at the shape of the picture the driver already
+knows, and asks for 4:3 when it is narrower than 3:2 and for 16:9 otherwise. MPEG-2, discs with their own codes, and
+every other output resolution are unchanged. The patched code is the same in every firmware we have (RU, USA,
+Cambridge CXUHD).
+
+### 23. Dolby Vision stays on after playback, black menu (v2.0.0)
+
+**Symptom:** with Output Resolution set to Source Direct, after a Dolby Vision file is stopped or ends, the home
+menu and the screen saver are black and the TV stays in Dolby Vision. Playing and stopping another file may bring the
+menu back. With Output Resolution on Auto it does not happen. In our tests it happened on about three stops out of
+four with oppo-dv-mkv v1.9.0 installed, with every kind of Dolby Vision file, also the ones the Oppo plays without
+this project. The fault is in Oppo's driver and is a matter of timing; the stock player passed the one stop we
+tried, so we cannot say how often it shows there.
+
+**Cause:** at the end of playback the video driver tells the HDMI output to leave Dolby Vision only if a "the video
+was Dolby Vision" marker is still set at that moment. The same marker is refreshed by the display interrupt at every
+frame. In Source Direct the stop also changes the output resolution, the driver gets to that step late, the
+interrupt has cleared the marker first, and the step is skipped. Nothing tries again, so the menu is sent as a Dolby
+Vision signal, which the TV shows as black.
+
+**Fix:** a short patch in the video driver (`dvexit.sh`, part of the Dolby Vision MKV fix): at that step, when the
+marker is already clear, no Dolby Vision source or video path is left and the HDMI output still signals Dolby Vision
+(TV-led or low latency), the driver leaves Dolby Vision all the same. Every other case is unchanged. The patched
+code is the same in every firmware we have (RU, USA, Cambridge CXUHD); the HDMI code it reads from sits at a
+different address in each, which `dvexit.sh` finds on the player.
+
+### 24. TV-led Dolby Vision metadata lost on the way to the TV, CM 2.9 and CM 4.0 (v2.0.0)
+
+In TV-led Dolby Vision the player does not touch the picture. It sends it to the TV together with the film's
+metadata, frame by frame, and the TV does the mapping to its panel. So the picture should be the one the TV shows
+when it plays the same file itself.
+
+**Symptom:** it was not. With test films made for this (one metadata change per shot, measured on an LG C1 against
+the C1's own player):
+
+| Metadata | Through the Oppo, stock |
+|---|---|
+| L1 (brightness of the scene) with a maximum above the mastering display's | replaced by the player's own values, the scene is mapped as if it were dimmer |
+| L2 trim: positive lift (offset above neutral) | no effect |
+| L2 trim: slope, power, saturation, chroma weight, negative lift | right |
+| L5 (active area, the film without its black bars) | not sent |
+| CM 4.0: L3, L8 (the trims that replace L2), L9, L11, L254 | not sent, the TV uses the CM 2.9 trims |
+
+**Cause:** three places in Oppo's video driver, in the code that prepares the metadata for HDMI. It drops L5. It
+overwrites L1 with limits of its own when the scene is brighter than the mastering display. It cuts positive lift
+when the film has L5 bars; and the C1 honours positive lift only for a film that sends L5, so no lift ever got
+through. Apart from that the driver's reader only knows the CM 2.9 blocks: the CM 4.0 blocks sit in a second list
+of the same metadata packet that the driver never reads.
+
+**Fix** (`dvcm.sh`, part of the Dolby Vision MKV fix):
+
+- three instructions in the driver so L1, L2 and L5 go out as authored;
+- a reader for the second list: L3, L8, L9, L10, L11 and L254 are appended to the metadata sent to the TV;
+- **L5 for the picture the player really sends.** L5 counts in pixels of the film; the player adds its own bars
+  (a 3840x1600 file), scales (a 1080p file) or zooms, so the numbers are converted to the output frame;
+- **subtitles, info bar and menus in the bars.** A TV blanks everything outside the L5 area, including what the
+  player draws there. The patch looks at what the player's graphics planes show outside the area, at every frame,
+  and widens the area to take that in, only on the side and only as far as needed. L5 is always sent, so the
+  picture does not change when a subtitle appears (see [limitations](#known-limitations) for the one visible
+  side effect).
+
+The patched code is at the same place in every firmware we have a dump of (RU, USA, a third build, Cambridge
+CXUHD); `dvcm.sh` reads the six data addresses it needs from the driver on the player and checks everything it
+relies on before writing. Details: [docs/TECHNICAL.md](docs/TECHNICAL.md), Part 2c-4.
+
+### 25. Player hangs at the next file after an MP4 was stopped (v2.0.1)
+
+**Symptom:** an MP4 with an audio track is stopped. The next file, of any kind, sits at the loading screen (50, 75
+or 100 %) and the player answers nothing until it is power-cycled. It does not happen at every stop: with two of our
+test files about every second one. Also on stock firmware, without oppo-dv-mkv.
+
+**Cause:** when playback stops, the player program first disables the demuxer filter of each stream and then
+disconnects it. The driver frees a filter's slot only if it was disabled first. With MP4 files the program
+sometimes leaves out the "disable" of the audio filter (a timing fault between its stream handlers). The driver
+then refuses the disconnect and the slot stays taken. The next file gets its slots one place further on, one lookup
+returns "no slot" (-1), a driver thread uses that as an index and crashes, and the start never finishes.
+
+**Fix:** two instructions in the demuxer driver's disconnect (`ftrfix.sh`, part of the Dolby Vision MKV fix): where
+it only tested "still enabled?" and gave up, it now calls the driver's own disable, which does nothing for a filter
+that is already disabled, and goes on to free the slot. A stop the program did in the right order runs as before.
+The code is the same in every firmware we have a dump of (RU, USA, Cambridge CXUHD) and is checked before it is
+written. Details: [docs/TECHNICAL.md](docs/TECHNICAL.md), Part 2b-2.
+
+### 26. Profile 7 MP4 stops a second after it starts (v2.0.1)
+
+**Symptom:** a Dolby Vision profile 7 MP4 with both layers in one track starts, shows about a second and stops;
+the file that plays next can hang. Seen with encodes from x265 muxed with several frames per chunk. The same
+stream in an MKV, or in an MP4 with one frame per chunk (what ffmpeg writes), plays. Also on stock firmware.
+
+**Cause:** x265 writes a small NAL (a suffix SEI) after the last base-layer slice of each picture. The MP4 demuxer
+collects small NALs into a batch before it passes them on. At the first enhancement-layer NAL of the file it stops
+to send the enhancement layer's parameter sets first. If a batch is open at that moment (the SEI just opened one),
+it takes the NAL back out of the batch but keeps its bytes subtracted from "bytes left in this frame". The NAL is
+counted twice, the last NAL of the frame (the RPU) no longer fits, and the demuxer reports an error after waiting
+5 seconds. The decoders then read what is left in their queues as something else and the player stops the file.
+
+**Fix:** a patch in the demuxer driver (`mp4elfix.sh`, 8 instructions, part of the Dolby Vision MKV fix): while the
+enhancement layer's parameter sets are still to be sent in a Dolby Vision MP4, small NALs are not batched. The
+first enhancement-layer NAL then finds no open batch and takes the path it takes in the files that always played.
+Checked before it is written; the code is the same in every firmware we have a dump of. Details:
+[docs/TECHNICAL.md](docs/TECHNICAL.md), Part 2b-3.
+
 ## Tests
 
 All tests were run on one Oppo UDP-203 with the RU 65-0131 jailbreak, connected through an AV receiver to a Dolby
@@ -902,6 +1154,120 @@ Kernel counters showed whether any hook ran.
 | ... installed persistently, after a reboot | `sarfix: on (on)` in the boot log, together with every other patch; boot marked healthy |
 | Installer, offline: every scenario, including updating from v1.5.0 and v1.6.0 | all pass (50 steps); the update adds `sarfix.sh`, and the check zip reports it (`pixel AR:`) |
 
+### Subtitle formats together, PGS timing (v1.9.0)
+
+Test files: remuxes of the synthetic suite's MKV (every subtitle line names its format, language, track, number and
+time; lines every 5 s) with SRT, ASS, PGS and VobSub tracks in different orders and languages, so that playback
+starts on each format in turn; a PGS-only MKV; an M2TS with PGS; an MP4 (MP4Box) with VobSub and `tx3g`. Every
+result was checked on the TV's own screen capture of the HDMI input.
+
+| Test | Stock / v1.8.1 | v1.9.0 |
+|---|---|---|
+| Start on SRT → PGS → ASS → PGS → VobSub | PGS: nothing shown | ✅ every track shown |
+| Start on PGS → SRT → PGS → VobSub | SRT, VobSub: nothing, last PGS line stuck | ✅ every track shown, PGS line cleared |
+| Start on VobSub → PGS and back (files with and without text tracks) | PGS: nothing shown | ✅ both shown |
+| Subtitles off and on again, on each format | | ✅ |
+| PGS line on and off times (lines at 6 to 9 s, 11 to 14 s, ...) | | ✅ on time |
+| Seek forward and backward on the PGS track | | ✅ the next line appears on time and stays its full time |
+| PGS-only MKV | fine | ✅ unchanged (Oppo's own path) |
+| PGS in M2TS | PGS only from about 20 s after the start | unchanged |
+| MP4: VobSub → `tx3g` → VobSub | | ✅ both directions, VobSub stays in place |
+| The patches in an ARM emulator against the library image (84 checks) | | ✅ all pass |
+| Regression: synthetic suite (MKV and MP4 subtitles, tracks, chapters, seeks), DV P7 FEL MKV and MP4 | | ✅ all pass |
+| Installed persistently, after a power cycle | | ✅ `dvhook ON` in the boot log; the main switch tests repeated, all right |
+
+### 4:3 / 16:9 flag in Source Direct (v1.9.0)
+
+Test clips: a test pattern with a box that must look square, 720x576 and 720x480 (and 640x480 with square pixels),
+4:3 and 16:9, H.264, MPEG-2 and HEVC, in MKV, M2TS and MP4 (the M2TS and MP4 are copies of the MKV's stream): 22
+files. Output Resolution: Source Direct. The flag was read on the TV (LG C1: the AVI InfoFrame's aspect ratio and the
+width of the picture it shows), and screen grabs checked the box.
+
+| Test | Result |
+|---|---|
+| Stock driver, 4:3 H.264 in MKV (576, 480, 640x480) | flagged 16:9, stretched (the reported bug) |
+| Stock driver, 16:9 H.264 in M2TS and MP4, 16:9 HEVC in M2TS (576) | flagged 4:3, squeezed |
+| Stock driver, the other 16 files (MPEG-2, HEVC in MKV, 4:3 in M2TS/MP4, 16:9 in MKV) | right |
+| With the patch, all 22 files | **right**; the 16 that were right are unchanged |
+| `arflag.sh` on the driver images of every player we have a dump of (RU, several USA players, the +0x50 build, Cambridge CXUHD), simulated | the same code and table values in all of them: check, on, off and status work, off gives back the original bytes, an interrupted on is completed or undone; `p7kel.sh` still fits |
+| The stub in an ARM emulator, 18 cases (codes, TV aspect modes, shapes, zero sizes) | all as expected |
+
+Not tested: DVDs and SD extras of Blu-ray discs in Source Direct.
+
+### Dolby Vision off after playback (v2.0.0)
+
+Output Resolution: Source Direct, TV-led Dolby Vision, LG C1. After each stop the player's HDR status was read over
+IP control and the TV's picture was grabbed (a black menu reads as an all-black frame).
+
+| Test | Result |
+|---|---|
+| v1.9.0, stop after 15 s, Dolby Vision transport stream (played by the stock player code) | menu black and TV in Dolby Vision on about 3 stops of 4 |
+| Stock player (all patches off for one boot), same file | 1 stop, menu right (too few to say it never happens) |
+| With the patch: the same file, 8 stops in a row | **8 of 8** back to the normal menu |
+| With the patch: profile 7 FEL MKV, profile 8 MKV, profile 5 MKV, profile 8 MP4, dual-track M2TS | all back to the normal menu |
+| With the patch: last file of a folder played to its end | 3 of 3 back to the normal menu |
+| Patch switched off again | black menu on the first stop; on again: 4 of 4 right |
+| Output Resolution Auto, with the patch | unchanged, right |
+| Installed persistently, after a reboot | `dvexit: on (on)` in the boot log; 8 stops and 2 file ends, all right |
+| `dvexit.sh` on the driver images of every player we have a dump of (RU, several USA players, the +0x50 build, Cambridge CXUHD), simulated | check, on, off and status work in all of them, off gives back the original bytes, `p7kel.sh` still fits |
+| The stub in an ARM emulator on each of those images, 48 cases (marker, source type, video path, the two HDMI flags) | all as expected |
+
+Not tested: low latency (player-led) Dolby Vision, Dolby Vision discs, other TVs.
+
+### TV-led Dolby Vision metadata (v2.0.0)
+
+LG C1, TV-led Dolby Vision, RU player. Eight test files made with dovi_tool: the same test pattern (grey steps,
+ramps, colour steps) in 6-second shots, each shot with one change in the metadata. Each shot was grabbed from the
+TV and the flat patches measured. The reference is the same video stream played by the C1's own player from an
+MP4 copy.
+
+| Test | Result |
+|---|---|
+| Stock driver, CM 2.9 files: L1 maximum above the mastering level; L2 positive lift; L5 | differs from the TV's own player (see the table in fix 24) |
+| Stock driver, CM 4.0 file: L3, L8 | no effect, the L2 trims are used |
+| With the patch, CM 2.9: L1 (two mastering levels, 12 shots), L2 (14 shots), L5 (5 shots), L5 with lift (4 shots) | every shot within 3 of 255 of the TV's own player |
+| With the patch, CM 4.0 (13 shots: L8 lift, saturation, mid contrast, clip trim and a saturation vector; L8 against L2; L3; L9) | every shot within 3 of 255 |
+| With the patch, L5 geometry: a 1080p file and a 3840x1600 file (7 shots each) | every shot within 3 of 255, bars black |
+| Subtitle whose descenders reach into the bottom bar, L5 bars | shown complete, the bar black around it |
+| Info bar, L5 bars | complete, top and bottom |
+| Option menu, L5 bars | complete; only the top bar is widened, the bottom bar stays black |
+| L5 bars and positive lift, no graphics | bars black, lift applied |
+| Subtitles moved down with the player's subtitle shift, second line entirely in the bottom bar | shown complete, the bar black around it |
+| Installed persistently, after a reboot | `dvcm: on (on)` in the boot log; all eight test files measured again, every shot within 3 of 255 |
+| `dvcm.sh` on the player: check, on, off, on; switched on over an older build of the patch | all right |
+| CPU load of the per-frame look at the graphics planes | player 98% idle during playback with subtitles |
+| The metadata reader in an ARM emulator on every packet of the CM 4.0 file, against dovi_tool's decode | every block identical; the CM 2.9 blocks unchanged |
+| The L5 code in an ARM emulator, 28 cases (scaling, bars, zoom, graphics on each side, three pixel formats, bad addresses) | all as expected |
+| `dvcm.sh` on the driver images of every player we have a dump of (RU, several USA players, the +0x50 build, Cambridge CXUHD), simulated, and both emulator tests on each patched image | check, on, off and status work in all of them, off gives back the original bytes, `p7kel.sh` still fits, all emulator cases pass |
+
+Not tested: other TVs, players other than the RU one (simulated only), Dolby Vision discs, VobSub / PGS subtitles
+in the bars of a Dolby Vision file, L10.
+
+### Starting and stopping files (v2.0.1)
+
+RU player on an LG C1, files started over the network API and stopped with the remote-control command, the kernel
+log read at every stop.
+
+| Test | Result |
+|---|---|
+| v2.0.0-beta: profile 7 FEL files (MKV, and MKV after MP4) started and stopped one after the other | a start hung at 0:00 within 2 to 7 starts, in each of six runs |
+| ... the same loop with only the multi-core reset of the profile 7 patch taken out | 22 starts, none hung |
+| v2.0.1-beta: one of those MKVs (2 minutes, no audio) started and stopped in a loop | 22 starts, none hung |
+| v2.0.1-beta: 14 jumps in that file, 10 in another profile 7 MKV, 8 each in a profile 7 and a profile 8 MP4 | all continue in Dolby Vision; the reset still runs after jumps (counter in `p7kel.sh status`) |
+| Stock demuxer: two MP4s with audio (profile 8, profile 7), played 10 s and stopped in turn | the audio filter stays allocated at about every second stop; the next file hangs (kernel oops) |
+| With `ftrfix.sh`: the same, 8 stops | 2 stops needed the patch (filter disabled in the disconnect, then freed), 6 were right by themselves; no hang |
+| Stock demuxer: the profile 7 MP4 from the report (x265, 6 frames per chunk) | stops after about a second |
+| With `mp4elfix.sh`: the same file | plays in Dolby Vision with FEL; 10 jumps; plays to its end and the next file starts |
+| Copies of that file with 1 frame per chunk, or without the suffix SEI of the base layer | play on stock too |
+| Installed from the zip, after a reboot: 18 files in a row (profile 7 MKV and MP4, profile 8 MP4 and MKV, profile 5, TS, an H.264 MP4, TrueHD), each played and stopped | all start, Dolby Vision where expected, every stop clean |
+| A profile 7 MKV made by mkvmerge from a dual-layer MP4 (`hvcE` record after the Dolby Vision one) | Dolby Vision with FEL; was HDR10 |
+| `ftrfix.sh` and `mp4elfix.sh` on the demuxer images of every player we have a dump of (RU, three USA players, Cambridge CXUHD), simulated | check, on, on again, off: as expected, and `off` gives back the original bytes; both fit beside `hvccfix.sh` |
+| The new `p7kel.sh` on the driver images of those players, simulated | on / off as expected; with the v2.0.0-beta patch active it reports `sites old` and waits for the next boot |
+| Installer, offline: every earlier scenario, plus updating from v2.0.0-beta and going back | all pass (93 steps) |
+
+Not tested: an MP4 whose enhancement-layer parameter sets are only in the `hvcE` box; long films in profile 7 MP4;
+players other than the RU one (simulated only).
+
 ### Extras (v1.7.1)
 
 | Test | Result |
@@ -946,8 +1312,8 @@ the subtitles, so every result below was checked on the picture.
 | Start on VobSub, file also has an ASS track | black | ✅ white with black outline |
 | VobSub only / changed palette | correct / correct | ✅ unchanged |
 | SRT → VobSub → ASS → VobSub, VobSub → SRT | green, text fine | ✅ VobSub correct, text unchanged |
-| Start on SRT or VobSub, switch to PGS | nothing shown | nothing shown (known limitation) |
-| Start on PGS, switch to SRT or VobSub, back to PGS | nothing shown, last PGS line stays; PGS fine | same (known limitation), no hang |
+| Start on SRT or VobSub, switch to PGS | nothing shown | nothing shown (fixed in v1.9.0) |
+| Start on PGS, switch to SRT or VobSub, back to PGS | nothing shown, last PGS line stays; PGS fine | same (fixed in v1.9.0), no hang |
 | MP4 (MP4Box), two 720x480 VobSub tracks: start, switch, switch back | too high | ✅ in place (same height as the MKV) |
 | Same tracks in an MKV | in place | ✅ unchanged |
 | Regression: synthetic suite (MKV and MP4 subtitles, tracks, chapters, seeks), DV P7 FEL MKV and MP4, P8.1 MP4, P5 MKV | | ✅ all pass |
@@ -997,7 +1363,12 @@ program if that file exists. The installer puts there:
 /mnt/ubi_boot/oppo-dv-mkv/p7kel.sh    kernel patch     (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/bgfix.sh    kernel patch, black letterbox bars in Dolby Vision (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/sarfix.sh   kernel patch, non-square pixels stretched to 16:9 (on|off|status|check)
+/mnt/ubi_boot/oppo-dv-mkv/arflag.sh   kernel patch, 4:3 / 16:9 flag of SD files in Source Direct (on|off|status|check)
+/mnt/ubi_boot/oppo-dv-mkv/dvexit.sh   kernel patch, Dolby Vision left on after playback, black menu (on|off|status|check)
+/mnt/ubi_boot/oppo-dv-mkv/dvcm.sh     kernel patch, TV-led Dolby Vision metadata: CM 2.9, CM 4.0, L5 (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/hvccfix.sh  kernel patch, MKVs without VPS/SPS/PPS in the hvcC (on|off|status|check)
+/mnt/ubi_boot/oppo-dv-mkv/ftrfix.sh   kernel patch, hang at the next file after a stopped MP4 (on|off|status|check)
+/mnt/ubi_boot/oppo-dv-mkv/mp4elfix.sh kernel patch, profile 7 MP4s that stop after a second (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/subs.sh     subtitle patch (one layout per regional v65 player program; check)
 /mnt/ubi_boot/oppo-dv-mkv/image_bdp83.bin  subtitle colour menu image, built at install time, swapped into /res at boot
 /mnt/ubi_boot/oppo-dv-mkv/alacdec.bin, bdpaudec.db  ALAC audio decoder of firmware 56/60 and the player's audio decoder
@@ -1067,6 +1438,67 @@ requests.
 </p>
 
 ## Changelog
+
+- **v2.0.1-beta: hangs when a file starts; profile 7 MP4s that stop after a second.** A beta: tested on one
+  player (RU) and one TV (LG C1).
+  - **Profile 7 MKV hangs at 0:00 when it starts (a fault of this project's profile 7 patch, since v1.3.1).** The
+    patch resets the decoder's multi-core block for the enhancement layer after a seek. It also did so when a file
+    started, where the reset can hit the base-layer decoder while it is starting; the base layer then never
+    decodes a picture and the player hangs until it is power-cycled. Short clips started one after the other showed
+    it within a few starts. The reset now runs only after a seek, chapter skip or track change, and waits while
+    the base-layer decoder is using the hardware.
+  - **Hang at the loading screen of the next file after an MP4 with audio was stopped** (Oppo's bug, also on
+    stock): the audio stream's demuxer filter was sometimes not freed. `ftrfix.sh`, two instructions. See
+    [fix 25](#25-player-hangs-at-the-next-file-after-an-mp4-was-stopped-v201).
+  - **Profile 7 MP4 (both layers in one track) from x265 stops after a second** (Oppo's bug, also on stock): the
+    MP4 demuxer counted the first enhancement-layer NAL twice. `mp4elfix.sh`. See
+    [fix 26](#26-profile-7-mp4-stops-a-second-after-it-starts-v201).
+  - **Profile 7 MKV made from a dual-layer MP4 played as HDR10:** mkvmerge writes the enhancement layer's `hvcE`
+    record after the Dolby Vision record, and our MKV hook read the second one as the Dolby Vision record. It now
+    reads only `dvcC` / `dvvC`.
+  - CM 4.0 from v2.0.0-beta is unchanged. The report "CM 4.0 not passing" came from test clips that hit the faults
+    above before any metadata was sent.
+  - Updating from v2.0.0-beta adds `ftrfix.sh` and `mp4elfix.sh` and replaces `p7kel.sh`, `dvhook.sh` and
+    `dvmkv.sh`. Power-cycle after installing (as always): the new profile 7 patch starts at the next boot.
+
+- **v2.0.0-beta: the Dolby Vision metadata the TV gets in TV-led mode; black menu after a Dolby Vision film.**
+  A beta: tested on one player (RU) and one TV (LG C1). Both are Oppo's bugs, also on stock firmware.
+  - **TV-led Dolby Vision as authored (CM 2.9):** the driver dropped the active area (L5), replaced L1 when a scene
+    is brighter than the mastering display, and no positive lift (L2) reached the TV's mapping. Three instructions
+    in the video driver.
+  - **CM 4.0:** L3, L8, L9, L10, L11 and L254 are read from the film and sent to the TV. Before, a CM 4.0 film was
+    mapped with its CM 2.9 trims.
+  - **L5 fits the picture the player sends** (its own bars, scaling, zoom), and is widened at every frame to what
+    the player draws outside it, so subtitles, the info bar and menus in the black bars are not blanked by the TV.
+  - All of this is `dvcm.sh`, part of the Dolby Vision MKV fix, every place checked before it is written. It works
+    on every Dolby Vision source in TV-led mode. See
+    [fix 24](#24-tv-led-dolby-vision-metadata-lost-on-the-way-to-the-tv-cm-29-and-cm-40-v200) and the
+    [limitations](#known-limitations).
+  - **Black home menu after a Dolby Vision film in Source Direct:** the TV stayed in Dolby Vision after a stop or
+    the end of a file and the menu and screen saver were black (a timing fault in Oppo's driver that showed often
+    with v1.9.0 installed). A short patch in the video driver (`dvexit.sh`, part of the Dolby Vision MKV fix, every
+    place checked before it is written) makes the player leave Dolby Vision. See
+    [fix 23](#23-dolby-vision-stays-on-after-playback-black-menu-v200).
+  - Updating from v1.9.0 adds `dvexit.sh` and `dvcm.sh` and replaces `dvmkv.sh`.
+
+- **v1.9.0: every subtitle format with every other one; the 4:3 / 16:9 flag in Source Direct.** All of these
+  are Oppo's bugs, also on stock firmware; see the table in
+  [Oppo bugs fixed](#oppo-bugs-fixed-subtitles-and-picture).
+  - **PGS subtitles in MKVs that also have SRT, ASS or VobSub tracks:** a PGS track chosen during playback is
+    shown; in files that start on PGS the other tracks are shown after a switch and the last PGS line no longer
+    stays on screen. PGS-only files are unchanged. See
+    [fix 20](#20-pgs-subtitles-together-with-other-subtitle-types-v190).
+  - **PGS timing:** lines appear and disappear at their own times, also after a seek (a 45 kHz / 90 kHz mix-up in
+    Oppo's code). See [fix 21](#21-pgs-subtitle-timing-and-seeks-v190).
+  - **MP4 VobSub subtitles from NTSC DVDs stay in their place** (in v1.8.1 they could jump back up, for example
+    after a subtitle switch). See [fix 19](#19-mp4-vobsub-subtitles-too-high-v181).
+  - **SD files in Source Direct get the right 4:3 / 16:9 flag** (reported on AVS Forum: 4:3 MKVs shown stretched).
+    A 4:3 H.264 MKV was flagged 16:9, and a 16:9 H.264 or HEVC picture in M2TS or MP4 was flagged 4:3. A short
+    patch in the video driver (`arflag.sh`, part of the Dolby Vision MKV fix, every place checked before it is
+    written) sets the flag by the shape of the picture. See
+    [fix 22](#22-wrong-43--169-flag-for-sd-files-in-source-direct-v190).
+  - The known limitation on PGS subtitles is gone; what is left is under [Known limitations](#known-limitations).
+  - Updating from v1.8.1 adds `arflag.sh` and replaces `dvhook.sh` and `dvmkv.sh`; the other files stay as they are.
 
 - **v1.8.1: VobSub subtitles, and two fixes for v1.8.0.**
   - **Dolby Vision MKV fix not switched on at boot on some players** (v1.8.0 bug; `dvmkv.log` showed

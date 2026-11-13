@@ -15,10 +15,15 @@ The hardware is a MediaTek MT8581 (4× Cortex-A9) running Linux 3.10.
 |---|---|---|---|
 | MKV Dolby Vision signalling | `liblp.so` inside the running `bdpprog.1` (via `/proc/<pid>/mem`) | `dvhook.sh` | `src/liblp/` |
 | MP4: Dolby Vision profile 8, languages, text subtitles, chapters, language list, subtitles in "bad interleave" mode (v1.8.0) | `liblp.so` (same as above) | `dvhook.sh` | `src/liblp/`, `src/liblp/mp4/` |
+| Subtitle formats: VobSub colours and position (v1.8.1), PGS together with other formats, PGS clock (v1.9.0) | `liblp.so` (same as above) | `dvhook.sh` | `src/liblp/mp4/` (`mp4.c`, `shims.S`), sites in `src/liblp/mkinstall.py` |
 | Profile 7 decoder fixes | `bdpdrv1` kernel module (via `/dev/mem`) | `p7kel.sh` | `src/kernel/` |
 | Black letterbox bars in Dolby Vision (v1.6.0) | `bdpdrv1` kernel module (via `/dev/mem`), one instruction | `src/kernel/bgfix.sh` | none |
 | Non-square pixels stretched to 16:9 (v1.7.0) | `bdpdrv1` kernel module (via `/dev/mem`), two branches + a 30-word stub | `src/kernel/sarfix.sh` | `src/kernel/sar.S` |
+| 4:3 / 16:9 flag of SD files in Source Direct (v1.9.0) | `bdpdrv1` kernel module (via `/dev/mem`), one call + a 17-word stub | `src/kernel/arflag.sh` | `src/kernel/arflag.S` |
+| Dolby Vision left on after playback (v2.0.0) | `bdpdrv1` kernel module (via `/dev/mem`), one instruction + an 18-word stub | `src/kernel/dvexit.sh` | `src/kernel/dvexit.S` |
 | MKVs without parameter sets in the hvcC (v1.7.0) | `splitter.ko` kernel module (via `/dev/mem`), one branch + a 16-instruction stub | `src/kernel/hvccfix.sh` | `src/kernel/hvcc.S` |
+| Next file hangs after a stopped MP4 with audio (v2.0.1) | `splitter.ko` kernel module (via `/dev/mem`), two instructions | `src/kernel/ftrfix.sh` | none |
+| Profile 7 MP4 that stops after a second (v2.0.1) | `splitter.ko` kernel module (via `/dev/mem`), one branch + an 8-instruction stub | `src/kernel/mp4elfix.sh` | `src/kernel/mp4el.S` |
 | ALAC decoder of firmware 56/60 (v1.7.0) | `/res/bdpaudec.db` (symlink swapped by the boot wrapper) | `install.sh` builds it | `src/audio/alacdec.bin` |
 | Better subtitles | running `bdpprog.1` + `liblp.so` (RU 65-0131 program) | `subs.sh` | `src/subtitles/` |
 | Factory menu shortcut | running `bdpprog.1` (RU 65-0131 or jb_overlay V3 program) | `fpage.sh` | `src/factory-menu/` |
@@ -124,6 +129,106 @@ The two rules caught most ordinary MP4 films. v1.8.0 skips both (the two branch 
 chooses the mode. Tested: files with the only audio track stored after all the video still get the mode, exactly as
 on stock. A second audio track stored as one block at the end of the file is silent in both modes (the audio
 parser walks all audio tracks in file order), so the rules did not protect it either.
+
+## Part 1c: liblp.so, subtitle formats (VobSub v1.8.1, PGS v1.9.0)
+
+Same library and rules as Parts 1 and 1b, installed and switched by the same `dvhook.sh`. The code lives in a fourth
+blob at `0x53f4c4` (0x7fc bytes, over `vMPCTestOperation1`, an MPC file-playback self-test with the same callers as
+`vMPCTestOperation4`); the shared state at `0x757e80` grew to 0x128 bytes (VobSub frame sizes by track_ID, the
+`pgmix` flag at `+0xe6`). All of the bugs below are in the stock firmware.
+
+### Who draws subtitles
+
+Three parties are involved:
+- **MPC**, liblp's playback controller: a command table `_arMPC1ProcCmdInfo` (`0x724830`) of (command, pointer to 10
+  × (state, handler)); states 0 stop, 2 play, 3 pause, 4 backward, 5 backward pause, 6 preload, 8 wait pause,
+  9 wait stop. The handler pointers are relocated at load.
+- **SPS**, liblp's software subtitle decoder: draws text and VobSub on its own graphics plane
+  (`mrSpsEnableScreen` `0x57e790`) and, for format 12 (PGS), drives the player program's Blu-ray PG decoder through
+  `TSFile_*` imports (`TsFile_Init/Start/DisplayEnable`, `TSFile_ConsumeData`, `TSFile_TimeExpired`).
+- **The player program** (`bdpprog.1`): owns that PG decoder and, in "SP callback" mode, a parser of its own for MKV
+  PGS (`pb_parse_sp_mkv_pgs`).
+
+For an MKV the player program always asks for `PB_SP_USE_CALLBACK_FOR_PGS`. At file open
+(`CLpMkvMediaManagerProxy::mrMkvSetFileInf`), if the start track is PGS, liblp sets the MPC flag `fgSupportSpFilter`
+(ctx `+0x30a8c`): `mrMPC1ProcSetMMedInfCmdInStopSt` then allocates an MPC subtitle stream instead of creating an SPS
+(`fgMPCSpInit` `0x520924`, SPS id at ctx `+0x309b4`), and PGS packets go to the player program by callback
+(`[MPC] SP DATA AVAILABLE` → `<MKV_PGS>PBMG_SP`). Otherwise an SPS is created. The choice is made once, in the stop
+state. The start track is chosen by the subtitle language of the player's setup, not by track order or default flag.
+
+### VobSub palette in MKV (v1.8.1)
+
+| Site | Stock | Patched | Purpose |
+|---|---|---|---|
+| `0x3bf444` | `bl x_memset` | `nop` | `CLpMkvParser::mrGetVobSubInf` (`0x3bf424`) runs for every subtitle track with CodecPrivate and first clears the file's single palette slot (parser `+0x2e18`, 0x4c bytes; 16 × 4 palette at `+0x2e24`): an ASS track listed after a VobSub track left an all-black palette |
+| `0x3e1128` | `cmp r0, #0` | `bl v_vobsw` | in `mrChangeSpStNo` (`0x3e05a8`), after `mrChangeStreamInfo`: if the new track is internal and format 7 (VobSub), send its palette again with `CLpMovieMpcWrapper::mrSetSpPalette` (`0x4ee5e8`, MPC command 0x15). Stock sends it only from `mrMkvSetSpStreamInf`, at open, when the start track is VobSub: a track chosen later kept the old palette (dark green after text) |
+| `.data 0x7256b0` + 8k + 4, states 1 to 5, 8, 9 | 0 | `v_pltst` | MPC accepted command 0x15 only in state 0 (`mrMPC1ProcSetSpPltInStopSt` `0x5550c8` → `fgMPCSpSetPlt` → SPS command 0x107) and answered `0xa1000107` while playing. The new entries go through a guard to the same handler; the guard returns without calling it when no SPS exists (SPS id `-1` and ctx `+0x30a75` = 0), where the stock handler asserts |
+
+Data words whose stock value is 0 are a separate list in `dvhook.sh` (`ZSITES`): "0" is also what a not yet relocated
+word looks like, so they are written last and restored to 0.
+
+### VobSub frame size in MP4 (v1.8.1, v1.9.0)
+
+The MP4 path gives the SPS VobSub stream records with width and height 0 and mode 2, and the SPS then assumes a
+720x576 frame; a 720x480 track is drawn at 5/6 of its height on screen. The size is only in the track header.
+`.data 0x6ee354` (MP4 box dispatch table, `tkhd`) points to `m_tkhd`, which reads the box from the file and keeps
+width and height; the `hdlr` hook stores them for `subp` tracks by track_ID; `m_gsi` (the `mrGetStreamInfo` hook of
+Part 1b) sets the VobSub records (format 1) `r[7]`/`r[8]` to the size and `r[3]` to 1 (up to 480 lines) or 2, as
+`CLpMkvParser::vGetSpStrmInf` does for MKV. Since v1.9.0 it does so on **every** call: the parser rewrites the mode
+(not the size) later, and v1.8.1 only acted when the size differed, so the subtitles could go back to the 576-line
+view. The palette is read by Oppo's code from the `esds` as the binary 16 × 4 YCbCr table MP4Box writes; ffmpeg
+stores `.idx` text there, which gives wrong colours (a known limitation).
+
+### PGS after a switch: PES packets (v1.9.0)
+
+After a switch to a PGS track with an SPS running, `mrSpsScmdSpFormat` (`0x574d20`) goes to format 12 and
+`mrSpsGetAuTblData` hands every packet to `TSFile_ConsumeData` (`0x582bc4`). The PG decoder parses a packet as one
+MPEG PES packet (`00 00 01 BD`, header with PTS and DTS) holding **one** PGS segment, as a transport stream delivers
+it. A Matroska block is a whole display set of bare segments (type, 16-bit length, data; no `PG` magic, no time
+stamps), so nothing parsed: "segment ignored; is not a PCS".
+
+| Site | Stock | Patched | Purpose |
+|---|---|---|---|
+| `0x582bc4` | `bl TSFile_ConsumeData` | `bl p_feed` | `pg_feed`: if the packet does not start with a PES start code, copy the block, split it at the segment lengths and give the decoder one packet per segment: a 19-byte PES header (stream id `0xBD`, PTS = DTS = the block's 90 kHz time from packet `+0x18`) chained to the segment as a second fragment (the decoder walks fragment lists). Two heap blocks (`x_mem_alloc`) per display set |
+| `0x58abdc` | `push {r4-r6, lr}` | `b p_done` | first instruction of `SpsTsPgDataConsumedCb`: for one of our packets (magic) count down and return; with the last one free the two blocks and continue with the **real** packet, so the SPS releases it exactly once. Other packets pass through |
+
+A transport stream's own PES packets are recognised by their start code and passed on unchanged.
+
+### PGS as the start track with other formats in the file (v1.9.0)
+
+| Site | Stock | Patched | Purpose |
+|---|---|---|---|
+| `0x3d2370` | `mov r1, #1` | `bl p_mode` | `mrMkvSetFileInf`, start track is PGS: stock selects the callback mode (no SPS). `pg_mode` returns 0 (create the SPS, like any other start track) when the file has a subtitle track of another format (`vGetSpStrmInf` format ≠ 0xc for any of the proxy's `+0x125` tracks) or external subtitles (`u4GetExtSpCount`), and records that in `pgmix`; a PGS-only file returns 1 and keeps the stock path |
+| `0x57e36c` | `bne 0x57e380` | `b p_scr` | `mrSpsInitScreenPlane`: stock opens no screen plane when the SPS starts in format 12 (it was written for transport streams), so nothing could be shown, not even text after a switch. With `pgmix` the plane is opened |
+| `0x3e0a40` | `b 0x3e07e8` | `b p_same` | `mrChangeSpStNo`: "the same track is set again, it is track 1 and PGS" does a full stream change in stock. The player program sets the start subtitle again after every start and seek; with the SPS in use that restarted the PG decoder and lost the display sets it already held (several seconds of subtitles). With `pgmix` it is treated like any other track |
+
+Everything here is gated on `pgmix`, which `pg_mode` sets at each MKV open and the MP4 open clears.
+
+### PG decoder clock (v1.9.0)
+
+The player program's PG decoder counts in 45 kHz: it halves the PES time stamps, and `TsSpDecoderProxy::SetAtTime`
+doubles its timers again for the SPS. But `mrTsSpsDecoder` (`0x58afa0`) calls `TSFile_TimeExpired(when, now)` with
+both values in 90 kHz and the proxy passes them on as they are, so after the first timer the decoder believes it is
+twice as far into the film: every display set is due on arrival, and its clear follows at once. `mrSpsDcmdPlay`
+calls `TSFile_Start(STC)` with the clock from before a seek, which made the read-ahead burst after a seek show and
+clear a line immediately. Stock never showed any of this, because this path drew nothing for MKV.
+
+| Site | Stock | Patched | Purpose |
+|---|---|---|---|
+| `0x58affc` | `bl TSFile_TimeExpired` | `bl p_texp` | halve `when` (r0:r1) and `now` (r2:r3), then tail-call |
+| `0x573908` | `bl TSFile_Start` | `bl p_start` | start the PG decoder's clock at 0, so every display set gets a timer and only the per-set check decides |
+
+These two sites are not gated: they are only reached when an SPS feeds the PG decoder. For transport-stream PGS the
+test file behaved the same before and after (PGS from about 20 s after the start, as on stock).
+
+**What is left.** A seek into the middle of a line does not show that line (the display set is before the seek
+point); the line after it is on time.
+
+**Testing.** An offline simulation (an ARM emulator running the stubs against the library image) covers every stub: `v_vobsw`, `v_pltst`,
+`m_tkhd`, `pg_feed`/`pg_done` (packet layout, counts, release of the real packet, pass-through of PES input),
+`pg_mode`, `p_same`, `p_scr`, `p_texp`, `p_start`: 84 checks. On the player, a console log with every debug module
+of the player program on shows the PG decoder's own messages; the pictures were checked with the TV's screen
+capture of the HDMI input.
 
 ## Part 2: bdpdrv1 (profile 7)
 
@@ -321,6 +426,16 @@ emptied the EL plane are fixed:
   Timeout`, `cur FBId:255`) and the EL resumes about a second later, at its next I picture. Seen in 19 of 20 such
   skips, against 1 of 81 otherwise. The stub makes the EL decoder (ES 1) do the same reset while its picture count
   (`+0x10`) is at most 1, unless the BL is decoding at that moment (state 5).
+  **v2.0.1:** up to v2.0.0-beta the stub also ran at every file start (picture count 0 or 1 there too). A file start
+  follows a full stop, which has reset the block, so nothing is gained; and the BL decoder is then in its first
+  header parse (state 2), not in state 5, so the reset was not held back. When it hit, the BL logged its first
+  access unit and RPU and then nothing more (no `[RM-0]` resource decision, no LAE connect, no `u4H265NotiHdrInfo`
+  for ES 0), the EL went on alone, the shared FIFO filled and the player hung at 0:00; `VDec_Stop` for ES 0 never
+  finished. With FEL clips started and stopped one after the other: a hang within 7 starts in each of six runs; 0 in 22 with
+  the site restored; 0 in 22 with the new stub. Now `nofb_stub` (which runs exactly on "ReInit From SSStop") sets a
+  flag in `c2stat+16`, `vdp_gate` (entry of `VDec_Stop`, a full stop) clears it, and `mc_stub` resets only while it
+  is set, clearing it once the EL has more than one picture. Before the reset it waits (bounded loop) while the BL
+  decoder is in state 2 (header parse) or 4 (picture start), then skips if it is in state 5 as before.
 - **`rec_stub` / `cmp_stub` (frozen BL frame).** VDP1 times each EL frame against the frame VDP0 shows now
   (`EL − BL` PTS: < 0 late = dropped, 0 shown, > 0 wait; dovi threshold at `0x7ed2d3d8+0x30`). After a same-stream
   stop VDP0 keeps showing its last pre-seek frame until the first new BL frame is due. After a backward jump that
@@ -371,7 +486,7 @@ switched with the other hooks by `p7kel.sh on|off`.
 | 4096 | EL FIFO clear |
 
 `p7kel.sh status` prints the sites state (`ok`, `off`, or `old` when an older release's patch is active), the
-first 32 bytes of `elstat`, and `seek=` with the four cave-2 counters (`c2stat`, `0x7e94d3d0`), all zero on discs: EL multi-core resets, the VDP0 frame recorded
+first 32 bytes of `elstat`, and `seek=` with the five cave-2 words (`c2stat`, `0x7e94d418` since v2.0.1; the fifth is the "restart after a same-stream stop" flag), all zero on discs: EL multi-core resets, the VDP0 frame recorded
 at the last restart (0 once VDP0 moved on), EL frames held back from the frozen frame, and end-of-stream messages
 flagged (one per file played to the end).
 
@@ -457,6 +572,67 @@ Debugging: the demuxer's MKV log switches are bytes in its `.bss` (`/sys/module/
 `_fgCfaMkvDbgVideoLog` `+0x2723` and `_fgCfaMkvDbgLog` `+0x2725` (1 = on). With them on, an affected file logs
 `prCfaMkvInst->uArraysNs : 0x0` before the error.
 
+## Part 2b-2: splitter.ko (next file hangs after a stopped MP4 with audio, `ftrfix.sh`, v2.0.1)
+
+Each stream has a demuxer filter (`Ftrh 0x2340000` video, `0x2340001` audio, ...; table of 0x44-byte entries) with a
+parser filter slot (`Pfrh`) behind it: log lines `[LPDMX][FTR] FTR set Pfr, Ftrh: .. Pfrh: ..`. At a stop the
+middleware sends `DEMUX_SET_TYPE_CTRL` (disable: `i4FilterIfSetDisable`, log `diable ftr:2340001`) and later
+disconnects the component (`_FtrMw_Disconnect` -> `i4FilterIfDisconnectSpt`, `.text+0x2d830`), which does
+
+    if (fgFilterIsEnable(ftr) == 0 && i4Filter2PfrDelete(ftr) == 0 && i4SplitterIfDisconnectFtr(..) >= 0 ...)
+
+With MP4 the audio stream handler of `bdpprog` sometimes never sends the disable for the audio filter (the video
+one always comes). The filter is still enabled at the disconnect, `i4Filter2PfrDelete` is not called
+(no `i4PSR_Filter_Destroy, u4FilterHandle:0x1`, no `Pfrh: 0xffffffff` for `0x2340001`) and the slot leaks. At the
+next start `0x234000c` / `0x2340010` get Pfr 2 / 3 instead of 1 / 2 and a handle of -1 is used as an index:
+`Unable to handle kernel paging request` in `u4FilterGetPfrHandle+0x10` (from `i4Filter2PfrConnectPsr`) or
+`vFilterUpdateSyncUser+0x20`. Reproduced on the stock demuxer with nothing of ours loaded in it.
+
+The patch, both in `i4FilterIfDisconnectSpt`:
+
+| Site | Original | Patched |
+|---|---|---|
+| `+0x2d870` | `bl fgFilterIsEnable` (`46faffeb`) | `bl i4FilterIfSetDisable` (`a60000eb`, `+0x2db10`) |
+| `+0x2d878` | `bne` fail (`f2ffff1a`) | `nop` (`0000a0e1`) |
+
+`i4FilterIfSetDisable` tests `fgFilterIsEnable` itself and returns -1 at once for a disabled filter; for an enabled
+one it disables the stream in the demuxer and the parser filter, as the middleware's own disable does. Its result
+is ignored and the function goes on to `i4Filter2PfrDelete`. `ftrfix.sh` checks the whole disconnect function and
+the 96 bytes of `i4FilterIfSetDisable` before writing.
+
+## Part 2b-3: splitter.ko (profile 7 MP4 that stops after a second, `mp4elfix.sh`, v2.0.1)
+
+`vCfaMp4TxAvcPayload2Fifo` (`.text+0x44eb0`) walks the length-prefixed NALs of a sample. NALs below a size limit
+(`inst+0x308`) are collected into a batch: `inst+0xd32` batch open, `+0xd34` entry count, `+0xd38` bytes, `+0xd40`
+entries; `inst+0xd10` (u64) is "bytes left in this sample". `inst+0x22eb` = "EL header pending", set at every uninit.
+When a NAL header reads `7e 01` (the EL wrapper) with `22eb` set, the code at `+0x450a4` sets `22ea` and clears
+`22eb`; `22ea` makes the demuxer leave the payload state for state 0x10 (`vCfaMp4TXELHeader2Fifo`: the parameter
+sets of the `hvcE` box, one packet per call) and come back.
+
+Without an open batch that detour is clean. With one (an x265 stream has a suffix SEI, NAL type 40, after the BL
+slice, small enough to open a batch), the code at `+0x45cf0` takes the EL NAL back out of the batch (count - 1,
+bytes - length) but leaves its length + prefix subtracted from `+0xd10`. After the detour the NAL is read and
+subtracted again. At the last NAL of the sample (the RPU) `length + prefix <= left` fails by exactly the size of
+that first EL NAL: `x_thread_delay(5000)`, demux error, flush. The BL decoder then logs `Rpu Type 0x00400000 is not
+right` on a stray queue entry and decodes EL data as base layer, and the application stops the file. Files with one
+sample per chunk never batch; a file whose BL has no suffix SEI has no open batch at the first EL NAL.
+
+Three other ways were tried and dropped (giving the bytes back, never taking the detour, taking it later): the EL
+header has to reach the parser before any EL data, or a later stop leaves the next profile 7 file hanging. The
+patch keeps that order:
+
+| Site | Original | Patched |
+|---|---|---|
+| `+0x453d4` | `ldrb r3, [r6, r5]` (`0530d6e7`; r5 = 0x22ea, nonzero = do not batch) | `b` stub (`626d00ea`) |
+
+The stub (`mp4el.S`, 8 words at `+0x60964`, in `cli_cfamkv_debug_off` behind the `hvccfix.sh` stub; these 8 original
+words hold no addresses, so they are kept in the script) loads `22ea` as before and, when that is 0 in a Dolby
+Vision file (`inst+4`), loads `22eb` instead: no batching while the EL header is pending. Side effect: in a Dolby
+Vision MP4 without wrapped EL NALs (profile 5 / 8, or a profile 7 file with unwrapped EL) `22eb` is never cleared
+and the file is not batched at all; such files played and seeked normally in our tests. `mp4elfix.sh` checks the
+code that arms the detour, the batch test around the site, the un-add at `+0x45cf0` and the code behind the cave.
+`build.sh` assembles `mp4el.S` and checks it against the hex in the script.
+
 ## Part 2c: bdpdrv1 (non-square pixels stretched to 16:9, `sarfix.sh`, v1.7.0)
 
 Addresses are bdpdrv1 virtual addresses (module at `0x7e8d3000`).
@@ -497,6 +673,205 @@ no site redirected (an interrupted `on` or `off`) is reported as `partial` or `o
 Workaround without the patch: set the stream's SAR to 1:1, for example `ffmpeg -i in.mkv -map 0:v:0 -c copy -bsf:v
 hevc_mp4toannexb,hevc_metadata=sample_aspect_ratio=1/1 video.hevc`, then mux it again with mkvmerge (Dolby Vision
 and HDR10+ metadata stay in the stream).
+
+## Part 2c-2: bdpdrv1 (4:3 / 16:9 flag of SD files in Source Direct, `arflag.sh`, v1.9.0)
+
+Addresses are bdpdrv1 virtual addresses (module at `0x7e8d3000`).
+
+`VDP_DecideSrcOutRegion` (`0x7e9b0f34`) ends its aspect handling at `0x7e9b1e2c` with
+`bl VDP_SetAspectRatioDescription` (`0x7e9b0a80`): r0 = the picture's aspect code (frame header `+0xe8`, the
+`SRC_ASP_*` names in `strSrcAspMsg`: 0 unknown, 1 1:1, 2 4:3 full, 3..8 letterbox kinds, 9 16:9 full, 10 2.21:1,
+11 16:9 pan-scan, 12 undefined, 13 customized = ratio from the container), r1 = the TV aspect mode from
+`VDP_GetPMXTvAspectRatio`. The function indexes two tables with (mode section x 14 + code), sections for modes 2, 3,
+5 and "other": `TVE_ASP_MATRIX` (analogue WSS) and a table of (HDMI picture aspect, AFD) pairs at the address in its
+literal pool (`0x7e9b0f00`) `+0x30`. It stores the pair in `_u1HDMIPar` / `_u1HDMIAfd` and calls `vVdpSetAspectRatio`
+(`0x7eb85f30`), which sends the AVD command behind the AVI InfoFrame when the pair changes. Picture aspect 0 = 4:3,
+1 = 16:9.
+
+With Source Direct and SD output the mode is 3 for 4:3 MKVs and for every H.264/HEVC file in TS or MP4 (6 for 16:9
+MKVs), and the picture is sent unscaled (`FIX ASP` log: output window = the whole 720x576 or 720x480 frame). The mode
+3 section says 4:3 for codes 0 to 8 and 16:9 for codes 9 to 13. H.264 in MKV arrives with code 13 whatever the
+container ratio is (log `[H264] : IBCAsp[0], MWAsp[13], CodecAsp[0], CurrAsp[13]`), so 4:3 is flagged 16:9. H.264 and
+HEVC from TS and MP4, and HEVC from MKV, arrive with code 0, so 16:9 is flagged 4:3. MPEG-2 gives 2 or 9 from its
+sequence header. With a scaled output (1080p, 2160p) the mode was 6 in every test, the "other" section, where every
+code gives 16:9: the picture is scaled into a 16:9 frame, with bars when it is 4:3.
+
+The patch: site `0x7e9b1e2c` (`13fbffeb` → `136efeeb`) calls the stub in `arflag.S` at `0x7e94d680`, behind
+`sar.S` in the same unused function tail (`sar.S` ends at `0x7e94d678`, the function at `0x7e94d728`). For r1 = 3
+and r0 = 0, 1 or 13 it reads the source shape at VDP path `+0x698`/`+0x69c` (r4 holds the path all through
+`VDP_DecideSrcOutRegion`; the same pair as the `Src AR` log, kept small by `sarfix.sh`), and sets r0 = 0 when
+2w < 3h, else 13; a zero in the pair leaves r0 alone. Then it branches to `VDP_SetAspectRatioDescription`, which
+returns to the caller. Only r2 and r3 are used.
+
+`arflag.sh` checks the code that reads the shape through r4 (24 bytes at `0x7e9b1d30`), the call with its arguments
+(32 bytes before and 8 after the site), the first 16 bytes of the called function, the three table entries the stub
+relies on (mode 3: codes 0 and 1 → 0, code 13 → 1; the table address moves between builds, the values do not), the
+site word and the cave's 17 original words; `off` restores them. The cave is written first, then the site.
+`build.sh` assembles `arflag.S`, checks it against the hex in `arflag.sh`, and checks that both stubs fit.
+
+Debugging: VDP log flags as in Part 2c show `TV ASP`, `Src Asp`, `Src AR` and `FIX ASP`; `_u1HDMIPar` /
+`_u1HDMIAfd` are at `0x7ed2ce58` / `0x7ed2ce59` in the RU build.
+
+## Part 2c-3: bdpdrv1 (Dolby Vision left on after playback, `dvexit.sh`, v2.0.0)
+
+Addresses are bdpdrv1 virtual addresses (module at `0x7e8d3000`), data addresses those of the RU build.
+
+Two flags, read by `VDP_Hal_Isr` at `+0x46c` and `+0xa3e` of one base: `_bVideoDobly` (`0x7ee3c50c`, the video path
+is Dolby Vision) and `_bVideoDoblyPre` (`0x7ee3cade`). At every vsync the interrupt compares them, switches a
+hardware path bit when they differ, and copies the first to the second (`0x7e9955e4`).
+
+`VDP_Routine` handles the "HDR information changed" event (bit `0x800` of its event word, `0x7e9b3e8c`) in the block
+from `0x7e9b44ec`. From `0x7e9b5044` on, with sb = `&_u4VdpDolbySrcType` (`0x7ee3c928`): for a Dolby source it
+switches the HDMI signalling on (`vDolbyHdrEnable(1)`, or `vLowLatencyDolbyVisionEnable(1)` for the low latency
+output modes); for no Dolby source it prints `disable dovi path` and leaves r7 = 0. Then, at `0x7e9b5204`:
+
+```
+cmp   r7, #0
+bne   skip
+ldr   r3, =_bVideoDoblyPre
+ldrb  r3, [r3]                 ; 0x7e9b5210, the site
+cmp   r3, #0
+beq   skip
+mov   r0, r7 ; bl vDolbyHdrEnable ; mov r0, r7 ; bl vLowLatencyDolbyVisionEnable ; clear two sync flags
+```
+
+So the HDMI side leaves Dolby Vision only if the routine handles the event while the interrupt has not yet copied a
+cleared `_bVideoDobly` into the marker. With Output Resolution on Source Direct a stop also changes the HDMI
+resolution, the routine runs late, and the kernel log of a bad stop has `disable dovi path` without the
+`[HDMI][HDR] _fgDolbyHdrEnable =0` line that follows it in a good one. Afterwards `_fgDolbyHdrEnable` (HDMI state
+`0x7eea9788` `+0x87d`) is still 1 with source type, `_bVideoDobly` and the marker all 0, and the event does not come
+again: the menu goes out with the Dolby Vision signalling. The fault is stock; with oppo-dv-mkv v1.9.0 it was hit on
+about three stops of four (the extra work in the player program at a stop changes the timing).
+
+The patch: site `0x7e9b5210` (`0030d3e5` → `2b61feeb`) calls the stub in `dvexit.S` at `0x7e94d6c4`, behind
+`arflag.S` in the same unused function tail (the function's own return is at `0x7e94d724`). It returns the marker in
+r3 when that is set. Otherwise, when `[sb]` is 0 and `_bVideoDobly` (marker address `- 0x5d2`) is 0, it returns
+`_fgDolbyHdrEnable | _fgLowLatencyDolbyVisionEnable`, so the stock switch-off that follows runs once (both HDMI
+functions return at once when their flag already has the value). A source type other than 0 covers Dolby sources
+and the forced graphics-only mode (`VDPDoviHdrForceRun` sets type `0x10`). The stub uses r1 and r2, which are free
+there (the path that follows calls functions).
+
+The VDP code is at the same addresses in every build we have, the HDMI code is not (`vDolbyHdrEnable` is at
+`0x7ebc7860` in RU, `+0x30` in the USA builds, `-0x10` in the `+0x50` build, `+0x4` in the CXUHD). The stub's last
+word is therefore written by `dvexit.sh`: the address of the literal in `vDolbyHdrEnable` that holds the HDMI state
+base (function `+0xa0`), with the function found through the `bl` at `0x7e9b5220`.
+
+`dvexit.sh` checks the test and the switch-off around the site (apart from the two `bl` words), the `ldr sb` at
+`0x7e9b5044` and its use at `0x7e9b52a4`, the two flag offsets in `VDP_Hal_Isr`, 12 bytes of each of the two HDMI
+functions (the loads at `+0x87d` and `+0x87e`), that both functions use the same base, the site word and the cave's
+18 original words; `off` restores them. The cave is written first, then the site. `build.sh` assembles `dvexit.S`,
+checks it against the hex in `dvexit.sh` plus the RU literal, and checks that the stubs fit one behind the other.
+Tested with the script on every driver image and the stub's 48-case truth table in an emulator.
+
+The patch does not bring back a menu that is already black: the next stop does.
+
+## Part 2c-4: bdpdrv1 (TV-led Dolby Vision metadata: CM 2.9, CM 4.0, L5, `dvcm.sh`, v2.0.0)
+
+Addresses are bdpdrv1 virtual addresses (module at `0x7e8d3000`), data addresses those of the RU build.
+
+### The path of the metadata
+
+Per frame, synchronous in `DOVI_Process`:
+
+```
+md_parser_main -> rpu_decoder_get_output
+  dm_data_payload_read            0x7eb480fc   RPU bits -> vdr_dm_data_payload (0x1438 bytes, 255 ext blocks of 0x14)
+  dm_rpu_payload_2_byte_sequence  0x7eb442d8   -> dm metadata buffer (0x1334 bytes: 0x46 header, count, 255 slots of 0x13)
+control_path_main                 0x7eb54dec   commit_reg, then
+  update_md_for_hdmi              0x7eb55f9c   edits the buffer in place for the HDMI side
+get_md_len, Dovi_Core3_HalSetRawMetadata  0x7eb3ebf8   copies length + 5 bytes of every slot to the HDMI raw buffer (0x200)
+```
+
+A slot is a 4-byte length, the level, the payload. In TV-led mode this buffer is what the TV maps the picture with.
+
+### CM 2.9: three instructions in `update_md_for_hdmi`
+
+The function walks the slots (level at slot `+4`):
+
+| Site | Stock | Patched | Effect |
+|---|---|---|---|
+| `0x7eb56394` | `053042e2` `sub r3, r2, #5` | `063042e2` `sub r3, r2, #6` | the test that drops levels 5 and 6 drops only level 6: L5 stays |
+| `0x7eb563b4` | `2e00001a` `bne` | `2e0000ea` `b` | L1 is no longer replaced by the player's own crush / clip values (source maximum above the mastering display's) nor its average clamped |
+| `0x7eb564a8` | `1300001a` `bne` | `130000ea` `b` | positive L2 offset is no longer cut to neutral (2048) when L5 has non-zero offsets |
+
+Measured on an LG C1: without L5 in the metadata the TV ignores positive lift (L2 and L8 offset) altogether; with L5
+it honours it and blanks everything outside the active area; with L5 all zero it honours it for the whole frame.
+
+### CM 4.0: the second extension block list
+
+`dm_data_payload_read` reads one list of extension blocks and knows levels 1, 2, 4, 5, 6 and 255; for any other
+level it counts the block out and skips its bits. A CM 4.0 RPU has a second list after the first (block count
+`ue(v)`, byte alignment, blocks), before the CRC. The driver never reads it, and its structures have no room for
+the longer CM 4.0 blocks (0x14 / 0x13 bytes per block).
+
+The stub (`dvcm.S`) keeps the CM 4.0 blocks in the unused tail of the two buffers, already in the byte layout of the
+HDMI metadata (4-byte length, level, payload; fields above 8 bits as two bytes, big-endian), and appends them
+behind the stock blocks in the HDMI writer:
+
+- payload struct `+0x1200`, metadata buffer `+0x1100`: magic `DM4C`, block count, byte count, at most 0x180 bytes
+  of blocks;
+- field widths per level (bits): L3 12 12 12; L8 8 12×6 12 12 8×12 (as many fields as the block's length holds:
+  payload 13, 15, 17, 23 or 29 bytes); L9 8 16×8; L10 8 12 12 8 16×8; L11 8 8 8 8; L254 8 8.
+
+| Hook | Site | Stock word | What it does |
+|---|---|---|---|
+| `c4_reset` | `0x7eb4834c` | `4a00c5e5` | `dm_data_payload_read`, where the block count is stored: clears the stash for this RPU |
+| `c4_ext` | `0x7eb48630` | `4a30d2e5` | unknown level in the first list: reads the block if it is one of the six, then the stock skip |
+| `c4_list2` | `0x7eb48354` | `140094e5` | at the function's return: reads the second list if at least 8 bits are left |
+| `c4_copy` | `0x7eb43eb0` | `f08fbde8` | return of the struct converter: copies the stash from the payload struct to the metadata buffer |
+| `c4_fixed` | `0x7eb55134` | `2a0300eb` | `control_path_main` calling `get_fixed_metadata` (metadata the driver generates): no blocks of ours |
+| `c4_send` | `0x7eb3ece0` | `d020c7e1` | `Dovi_Core3_HalSetRawMetadata` after its copy loop: appends the stash, raises the block count and the length; nothing if it would pass 0x200 bytes |
+| `c4_l5` | `0x7eb5512c` | `9a0300eb` | `control_path_main` calling `update_md_for_hdmi`: runs it, then rewrites L5 (below) |
+
+### L5 for the output frame
+
+L5 holds four offsets in pixels of the coded picture; the TV applies them to the frame it receives. `c4_l5`
+converts each: the bar the player adds on that side plus (file offset − source crop) × output size / source size,
+rounded up. Source rectangle (x y w h) at video HAL state `0x7ed2bbf0` `+0xa4`, output rectangle at `+0x1bc`,
+output raster at Dolby context `0x7eea45e8` `+0x20` / `+0x24`. With no source rectangle the L5 slot is removed.
+
+### Graphics outside the active area
+
+`c4_gfx` then widens the area to the bounding box of itself and whatever the OSD planes show outside it. OSD canvas
+1920×1080; output raster 1920×1080 or 3840×2160 (anything else: no widening).
+
+- plane n enabled: bit 0 of `0x7ede0aac + 0x100 n`; plane struct `0x7ede1740 + 0x38 n`, region list id at `+0xc`;
+- list n at `0x7ede562c + 0x14 n`, first region at `+4`; region n at `0x7ede562c + 0xe10 + 0xc n`, next at `+8`;
+- region headers, 0x50 bytes: `[0x7ede1114] + 0x50 n` for n < 0x78, `[0x7ede1118] + 0x50 (n − 0x78)` above;
+- header: colour mode = byte 3 >> 4; bitmap (physical) = (word `+4` & 0xffffff) << 4 | bits 7-8 of u16 `+0x1e` << 28
+  | bits 2-3 of byte `+0x18` << 30; pitch = (u16 `+8` & 0x7ff) × 16; width u16 `+0x24`, height `+0x26`, x `+0x2e`,
+  y `+0x2a`; palette = (word `+0xc` & 0x3ffffff) << 4 | bits 4-5 of byte `+0x18` << 30.
+
+During playback the UI plane (0: info bar, menus, PGS of PGS-only files) is one 1920×1080 ARGB8888 surface (mode
+14), the subtitle plane (2) one ARGB4444 surface (mode 13, text subtitles) or 8-bit palette surface (mode 2,
+VobSub, alpha in byte 3 of the palette entry), transparent where nothing is drawn. Every enabled plane, up to four
+regions each, is sampled at every 8th pixel of every 4th row, only in rows and columns outside the active area;
+a pixel with alpha widens that side, with one sampling step of margin. A region in another format counts as drawn
+as a whole. Bitmaps and palettes are read through the kernel's linear mapping (physical + `0x80000000`) and only
+between physical `0x100000` and `0x3f000000`; `dvcm.sh` checks that mapping in the page tables. About half a
+million instructions per frame with two empty planes and 2.40:1 bars.
+
+### The script
+
+The stub is 2148 bytes in `parse_cmd_line_option` (`0x7eb53688`, 2384 bytes), a command line parser of the Dolby
+control path's test harness with no caller in the driver. All the code above is at the same addresses in every
+driver build we have; the data is not (RU 0, USA `+0x90`, a third build `+0x50`, CXUHD `−0x8`), and inside the cave
+function only the first 2176 bytes are the same everywhere, which is why the stub must stay below that. The stub's
+last six words are its data addresses. `dvcm.sh` reads them from literal pools of the driver's own code
+(`_OSD_PLA_GetEnable`, `VDP_HalGetFbAtIsrW`, `dovi_set_out_res`, `OSD_PLA_GetFirstRegion`, `OSD_RGN_LIST_GetHead`,
+`OSD_RGN_GetAdd`) and requires all six to be moved by the same amount.
+
+Checked before anything is written: the words around every site, the first words of every function and join the
+stub branches to, the instructions that load the six addresses and the region header getters (field offsets), the
+kernel's linear mapping, every site (stock or hooked) and the cave (stock or this stub). A driver with hooks into
+the cave and other cave contents is another version of this patch (`other`): `on` first restores stock. `on` writes
+the cave, then the hooks (the reset hook last, without it the others find no magic and do nothing), then the three
+CM 2.9 words; `off` goes the other way and restores the cave. `build.sh` assembles `dvcm.S`, compares it with the
+hex in the script plus the RU addresses, checks the hook words against the stub's symbols and that it fits.
+
+Tested: the script on every driver image; on each patched image the L5 code in an emulator (28 cases) and the
+parser, converter and HDMI writer on every RPU of a CM 4.0 file against `dovi_tool`'s decode; on the RU player
+against the TV's own player (README, Tests).
 
 ## Part 2d: audio DSP decoders (`bdpaudec.db`, v1.7.0)
 

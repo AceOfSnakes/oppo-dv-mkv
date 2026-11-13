@@ -7,8 +7,8 @@
 # If AutoScript/CHECKONLY exists it only writes a compatibility report to the log and the result file, changing nothing.
 #   /mnt/ubi_boot/bdpprog               boot wrapper (run by the jailbreak launcher instead of bdpprog.1)
 #   /mnt/ubi_boot/bdpprog.prev          the jb_overlay boot script, if that mod was installed (the wrapper chains to it)
-#   /mnt/ubi_boot/oppo-dv-mkv/          dvmkv.sh + the installed parts: dvhook.sh, p7kel.sh, bgfix.sh, sarfix.sh, hvccfix.sh,
-#                                       alacdec.bin, bdpaudec.db (Dolby Vision MKV fix), subs.sh, image_bdp83.bin
+#   /mnt/ubi_boot/oppo-dv-mkv/          dvmkv.sh + the installed parts: dvhook.sh, p7kel.sh, bgfix.sh, sarfix.sh, arflag.sh, dvexit.sh, dvcm.sh, hvccfix.sh,
+#                                       ftrfix.sh, mp4elfix.sh, alacdec.bin, bdpaudec.db (Dolby Vision MKV fix), subs.sh, image_bdp83.bin
 #                                       (subtitles), fpage.sh (factory menu), languages.txt (MP4 language list, from
 #                                       oppo-dv-mkv-languages.txt on the stick). RAM patches applied at every boot.
 # Nothing in the firmware itself is modified. Log: oppo-dv-mkv.log in the root of the USB stick.
@@ -66,6 +66,11 @@ KDIAG=${OPPODV_KDIAG:-sh $S/oppo-dv-mkv/p7kel.sh diag}
 BCHECK=${OPPODV_BCHECK:-sh $S/oppo-dv-mkv/bgfix.sh check}   # black letterbox bars (DV part; its own check at every boot)
 HCHECK=${OPPODV_HCHECK:-sh $S/oppo-dv-mkv/hvccfix.sh check} # MKVs whose hvcC has no VPS/SPS/PPS (DV part; idem)
 ACHECK=${OPPODV_ACHECK:-sh $S/oppo-dv-mkv/sarfix.sh check}  # non-square pixels stretched to ~16:9 (DV part; idem)
+FCHECK=${OPPODV_FCHECK:-sh $S/oppo-dv-mkv/arflag.sh check}  # 4:3 / 16:9 flag of SD pictures in Source Direct (DV part; idem)
+XCHECK=${OPPODV_XCHECK:-sh $S/oppo-dv-mkv/dvexit.sh check}  # Dolby Vision left on after playback, black menu (DV part; idem)
+CCHECK=${OPPODV_CCHECK:-sh $S/oppo-dv-mkv/dvcm.sh check}    # TV-led Dolby Vision metadata, CM 2.9 / CM 4.0 (DV part; idem)
+TCHECK=${OPPODV_TCHECK:-sh $S/oppo-dv-mkv/ftrfix.sh check}  # hang at the next file after an MP4 with audio was stopped (DV part; idem)
+ECHECK=${OPPODV_ECHECK:-sh $S/oppo-dv-mkv/mp4elfix.sh check} # profile 7 MP4s that stop after a second (DV part; idem)
 SCHECK=${OPPODV_SCHECK:-sh $S/oppo-dv-mkv/subs.sh check}
 MCHECK=${OPPODV_MCHECK:-sh $S/oppo-dv-mkv/fpage.sh check}
 RUN=$(running)
@@ -100,7 +105,12 @@ if [ -e $S/CHECKONLY ]; then
   echo "bdpdrv1:   $($KCHECK 2>&1 | tr '\n' ' ')"
   [ -f $S/oppo-dv-mkv/bgfix.sh ] && echo "letterbox: $($BCHECK 2>&1 | tr '\n' ' ')"
   [ -f $S/oppo-dv-mkv/sarfix.sh ] && echo "pixel AR:  $($ACHECK 2>&1 | tr '\n' ' ')"
+  [ -f $S/oppo-dv-mkv/arflag.sh ] && echo "SD flag:   $($FCHECK 2>&1 | tr '\n' ' ')"
+  [ -f $S/oppo-dv-mkv/dvexit.sh ] && echo "DV exit:   $($XCHECK 2>&1 | tr '\n' ' ')"
+  [ -f $S/oppo-dv-mkv/dvcm.sh ] && echo "DV metadata: $($CCHECK 2>&1 | tr '\n' ' ')"
   [ -f $S/oppo-dv-mkv/hvccfix.sh ] && echo "hvcC:      $($HCHECK 2>&1 | tr '\n' ' ')  (splitter: $(grep '^splitter ' $MODULES | cut -d' ' -f1,2,6))"
+  [ -f $S/oppo-dv-mkv/ftrfix.sh ] && echo "MP4 stop:  $($TCHECK 2>&1 | tr '\n' ' ')"
+  [ -f $S/oppo-dv-mkv/mp4elfix.sh ] && echo "MP4 P7:    $($ECHECK 2>&1 | tr '\n' ' ')"
   [ -f $S/oppo-dv-mkv/alacdec.bin ] && echo "audio db:  $(m5 $DBORIG)  (ALAC decoder swap needs 0abee82b1ea7bc77d3db30907355376b)"
   echo "bdpprog.1: $(m5 $PLAYER)  (region player program, informative)"
   echo "running:   $RUN  (player program in use)"
@@ -153,7 +163,12 @@ echo "firmware: bdpprog.1 md5 $(m5 $PLAYER), running player program ${RUN:-unkno
 [ -n "$MENU" ] && [ -n "$MENU_NN" ] && { echo "  factory menu shortcut $MENU_NN"; MENU=; MENU_R=$MENU_NN; }
 [ -n "$DV" ] && [ -z "$DV_WHY" ] && echo "video driver: $DVK" && echo "black letterbox bars: $($BCHECK 2>&1)" \
   && echo "non-square pixels (stretched to 16:9): $($ACHECK 2>&1)" \
-  && echo "MKVs without VPS/SPS/PPS in the hvcC: $($HCHECK 2>&1)"
+  && echo "4:3 / 16:9 flag in Source Direct (SD): $($FCHECK 2>&1)" \
+  && echo "Dolby Vision off after playback: $($XCHECK 2>&1)" \
+  && echo "TV-led Dolby Vision metadata (CM 2.9 / CM 4.0): $($CCHECK 2>&1)" \
+  && echo "MKVs without VPS/SPS/PPS in the hvcC: $($HCHECK 2>&1)" \
+  && echo "next file after a stopped MP4 with audio: $($TCHECK 2>&1)" \
+  && echo "profile 7 MP4s that stop after a second: $($ECHECK 2>&1)"
 [ -n "$SUBS" ] && [ -z "$SUBS_WHY" ] && echo "subtitles: $(echo $SCK)"
 [ -n "$MENU" ] && [ -z "$MENU_WHY" ] && echo "factory menu: $(echo $MCK)"
 for p in DV SUBS MENU; do
@@ -170,7 +185,7 @@ if [ -z "$DV$SUBS$MENU" ] && [ -n "$MENU_NN" ] && [ -z "$IN_DV$IN_SUBS" ]; then
   HEAD="NOTHING TO INSTALL - this player does not need it. Nothing was changed."; result; exit 0
 fi
 [ -n "$DV$SUBS$MENU" ] || fail "none of the parts in this zip can be installed safely on this player"
-FILES="dvmkv.sh${DV:+ dvhook.sh p7kel.sh bgfix.sh sarfix.sh hvccfix.sh alacdec.bin}${SUBS:+ subs.sh}${MENU:+ fpage.sh}"
+FILES="dvmkv.sh${DV:+ dvhook.sh p7kel.sh bgfix.sh sarfix.sh arflag.sh dvexit.sh dvcm.sh hvccfix.sh ftrfix.sh mp4elfix.sh alacdec.bin}${SUBS:+ subs.sh}${MENU:+ fpage.sh}"
 for f in $FILES bdpprog ${SUBS:+$(for q in $SQUARES; do echo sq$q.png; done)}; do
   [ -f $S/oppo-dv-mkv/$f ] || fail "missing $f on the stick (unzip the whole release)"
   grep -q " $f\$" $S/oppo-dv-mkv/MD5SUMS && [ "$(m5 $S/oppo-dv-mkv/$f)" = "$(grep " $f\$" $S/oppo-dv-mkv/MD5SUMS | cut -d' ' -f1)" ] \
@@ -183,7 +198,7 @@ put(){  # atomic copy: $1 source, $2 destination
   echo "  $2 installed"
 }
 for f in $FILES; do put $S/oppo-dv-mkv/$f $D/$f || fail "writing $D/$f"; done
-[ -z "$DV" ] && [ -e $D/p7kel.sh ] && rm -f $D/dvhook.sh $D/p7kel.sh $D/bgfix.sh $D/sarfix.sh $D/hvccfix.sh $D/alacdec.bin $D/bdpaudec.db && echo "  Dolby Vision MKV fix not installed now: older copy removed"
+[ -z "$DV" ] && [ -e $D/p7kel.sh ] && rm -f $D/dvhook.sh $D/p7kel.sh $D/bgfix.sh $D/sarfix.sh $D/arflag.sh $D/dvexit.sh $D/dvcm.sh $D/hvccfix.sh $D/ftrfix.sh $D/mp4elfix.sh $D/alacdec.bin $D/bdpaudec.db && echo "  Dolby Vision MKV fix not installed now: older copy removed"
 if [ -n "$DV" ]; then
   # audio DSP decoders: the player's own file, with the ALAC decoder of firmware 56/60 appended and its entry (index 28,
   # offset field at byte 1276) pointed at it. 65's ALAC decoder is too slow for some 192 kHz files (crackling).
