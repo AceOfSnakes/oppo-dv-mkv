@@ -26,6 +26,15 @@ llvm-objcopy -O binary -j .text build/hvcc.elf build/hvcc.bin
 H=$(od -An -v -tx1 build/hvcc.bin | tr -d ' \n')
 [ "$H" = "$(sed -n 's/^STUB=//p' hvccfix.sh)00000000" ] || { echo "hvccfix.sh STUB does not match hvcc.S"; exit 1; }
 echo "hvccfix.sh stub matches hvcc.S"
+# mp4elfix.sh carries its splitter stub as hex: rebuild it from mp4el.S (cave .text+0x60964, back to .text+0x453d8) and compare
+zig cc -target arm-freestanding-eabi -mcpu=cortex_a9 -marm -c mp4el.S -o build/mp4el.o
+ld.lld -static -Ttext=0x60964 --defsym cont=0x453d8 -e mp4el_stub build/mp4el.o -o build/mp4el.elf
+llvm-objcopy -O binary -j .text build/mp4el.elf build/mp4el.bin
+H=$(od -An -v -tx1 build/mp4el.bin | tr -d ' \n')
+[ "$H" = "$(sed -n 's/^STUB=//p' mp4elfix.sh)" ] || { echo "mp4elfix.sh STUB does not match mp4el.S"; exit 1; }
+[ $(stat -c %s build/mp4el.bin) -le $((0x60994 - 0x60964)) ] || { echo "mp4el.S does not fit its cave"; exit 1; }   # the words behind hold addresses
+[ $(stat -c %s build/hvcc.bin) -le $((0x60964 - 0x60904)) ] || { echo "hvcc.S runs into mp4el.S"; exit 1; }
+echo "mp4elfix.sh stub matches mp4el.S"
 # sarfix.sh carries the bdpdrv1 stubs as hex: rebuild them from sar.S (cave 0x7e94d600, joins in the two callers) and compare
 zig cc -target arm-freestanding-eabi -mcpu=cortex_a9 -marm -c sar.S -o build/sar.o
 ld.lld -static -Ttext=0x7e94d600 --defsym join_frame=0x7e9b8574 --defsym join_desired=0x7e9c18c4 -e sar_frame build/sar.o -o build/sar.elf

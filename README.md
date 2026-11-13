@@ -108,6 +108,12 @@ through the Oppo than played by the TV itself. In our tests on an LG C1 it now m
 shot. This is Oppo's driver, for every Dolby Vision source, not only MKV. See
 [fix 24](#24-tv-led-dolby-vision-metadata-lost-on-the-way-to-the-tv-cm-29-and-cm-40-v200).
 
+**Since v2.0.1 (beta):** three faults around starting and stopping files. A profile 7 MKV could hang at 0:00 when
+it started (a fault of this project's own profile 7 patch, there since v1.3.1). The file after a stopped MP4 with
+audio could hang at the loading screen, and profile 7 MP4s from some encoders stopped after a second (both Oppo's,
+also on stock firmware). See [fix 25](#25-player-hangs-at-the-next-file-after-an-mp4-was-stopped-v201), [fix 26](#26-profile-7-mp4-stops-a-second-after-it-starts-v201)
+and the [changelog](#changelog).
+
 ## Oppo bugs fixed: subtitles and picture
 
 While making MKV and MP4 files play properly, a number of bugs in Oppo's own firmware turned up. All of them are
@@ -129,6 +135,8 @@ MKV fix, and every place is checked before it is written.
 | ⬛ | **Black home menu and screen saver after a Dolby Vision film**, TV still in Dolby Vision, with Output Resolution on Source Direct | any Dolby Vision file | ✅ back to the normal menu | v2.0.0 | [fix 23](#23-dolby-vision-stays-on-after-playback-black-menu-v200) |
 | 🌗 | **Dolby Vision picture not as graded in TV-led mode**: lifted shadows not lifted, very bright scenes mapped as if dimmer, trims ignored | Dolby Vision with CM 2.9 metadata (L1 above the mastering level, positive L2 lift, L5) | ✅ same as the TV's own player | v2.0.0 | [fix 24](#24-tv-led-dolby-vision-metadata-lost-on-the-way-to-the-tv-cm-29-and-cm-40-v200) |
 | 🌗 | **CM 4.0 metadata never reaches the TV** (the TV falls back to the CM 2.9 trims) | Dolby Vision with CM 4.0 metadata (L3, L8, L9, L11, L254) | ✅ sent to the TV | v2.0.0 | [fix 24](#24-tv-led-dolby-vision-metadata-lost-on-the-way-to-the-tv-cm-29-and-cm-40-v200) |
+| ⏳ | **Player hangs at the loading screen** (50 / 75 / 100 %) of the next file, until it is power-cycled | any file started after an MP4 with audio was stopped | ✅ starts | v2.0.1 | [fix 25](#25-player-hangs-at-the-next-file-after-an-mp4-was-stopped-v201) |
+| ⏹️ | **Playback stops about a second after it starts** | Dolby Vision profile 7 MP4 (both layers in one track) from x265, several frames per chunk | ✅ plays, with FEL | v2.0.1 | [fix 26](#26-profile-7-mp4-stops-a-second-after-it-starts-v201) |
 | 🙈 | **No subtitles at all** in most ordinary MP4 films | MP4 with 2+ audio and 2+ subtitle tracks, or big low-bitrate files | ✅ shown | v1.8.0 | [fix 15](#15-mp4-subtitles-hidden-by-the-bad-interleave-mode-v180) |
 | 🔤 | **MP4 text subtitles not shown**, no languages in the menus | MP4 with `tx3g` / `mov_text` | ✅ shown, languages listed | v1.8.0 | [fix 16](#16-mp4-text-subtitles-languages-and-the-8-tracks-v180) |
 | 📐 | **Picture stretched to almost 16:9**, bars too thin | films with slightly non-square pixels (e.g. 3840x1744) | ✅ right bars | v1.7.0 | [fix 13](#13-non-square-pixels-stretched-to-169-v170) |
@@ -487,7 +495,7 @@ are not.
 - **MKV DV stopped working after a firmware update.** The patches only apply to the firmware they were made for, so
   the patcher logs a mismatch and does nothing.
 - **Check that it is active:** `dvmkv.log` on the player should contain `dvhook: dvhook ON`, `p7kel: p7kel ON`,
-  `bgfix: on (on)` (since v1.6.0), `sarfix: on (on)`, `arflag: on (on)` (since v1.9.0), `dvexit: on (on)` (since v2.0.0), `dvcm: on (on)` (since v2.0.0), `hvccfix: on (on)` and `dvhook: empty hvcC (no VPS/SPS/PPS):
+  `bgfix: on (on)` (since v1.6.0), `sarfix: on (on)`, `arflag: on (on)` (since v1.9.0), `dvexit: on (on)` (since v2.0.0), `dvcm: on (on)` (since v2.0.0), `ftrfix: on (on)` and `mp4elfix: on (on)` (since v2.0.1), `hvccfix: on (on)` and `dvhook: empty hvcC (no VPS/SPS/PPS):
   DV allowed` (since v1.7.0), `dvhook: MP4 language list: ...` (since v1.8.0) and `boot marked healthy`.
 
 ## What was broken, and how it was fixed
@@ -944,6 +952,43 @@ The patched code is at the same place in every firmware we have a dump of (RU, U
 CXUHD); `dvcm.sh` reads the six data addresses it needs from the driver on the player and checks everything it
 relies on before writing. Details: [docs/TECHNICAL.md](docs/TECHNICAL.md), Part 2c-4.
 
+### 25. Player hangs at the next file after an MP4 was stopped (v2.0.1)
+
+**Symptom:** an MP4 with an audio track is stopped. The next file, of any kind, sits at the loading screen (50, 75
+or 100 %) and the player answers nothing until it is power-cycled. It does not happen at every stop: with two of our
+test files about every second one. Also on stock firmware, without oppo-dv-mkv.
+
+**Cause:** when playback stops, the player program first disables the demuxer filter of each stream and then
+disconnects it. The driver frees a filter's slot only if it was disabled first. With MP4 files the program
+sometimes leaves out the "disable" of the audio filter (a timing fault between its stream handlers). The driver
+then refuses the disconnect and the slot stays taken. The next file gets its slots one place further on, one lookup
+returns "no slot" (-1), a driver thread uses that as an index and crashes, and the start never finishes.
+
+**Fix:** two instructions in the demuxer driver's disconnect (`ftrfix.sh`, part of the Dolby Vision MKV fix): where
+it only tested "still enabled?" and gave up, it now calls the driver's own disable, which does nothing for a filter
+that is already disabled, and goes on to free the slot. A stop the program did in the right order runs as before.
+The code is the same in every firmware we have a dump of (RU, USA, Cambridge CXUHD) and is checked before it is
+written. Details: [docs/TECHNICAL.md](docs/TECHNICAL.md), Part 2b-2.
+
+### 26. Profile 7 MP4 stops a second after it starts (v2.0.1)
+
+**Symptom:** a Dolby Vision profile 7 MP4 with both layers in one track starts, shows about a second and stops;
+the file that plays next can hang. Seen with encodes from x265 muxed with several frames per chunk. The same
+stream in an MKV, or in an MP4 with one frame per chunk (what ffmpeg writes), plays. Also on stock firmware.
+
+**Cause:** x265 writes a small NAL (a suffix SEI) after the last base-layer slice of each picture. The MP4 demuxer
+collects small NALs into a batch before it passes them on. At the first enhancement-layer NAL of the file it stops
+to send the enhancement layer's parameter sets first. If a batch is open at that moment (the SEI just opened one),
+it takes the NAL back out of the batch but keeps its bytes subtracted from "bytes left in this frame". The NAL is
+counted twice, the last NAL of the frame (the RPU) no longer fits, and the demuxer reports an error after waiting
+5 seconds. The decoders then read what is left in their queues as something else and the player stops the file.
+
+**Fix:** a patch in the demuxer driver (`mp4elfix.sh`, 8 instructions, part of the Dolby Vision MKV fix): while the
+enhancement layer's parameter sets are still to be sent in a Dolby Vision MP4, small NALs are not batched. The
+first enhancement-layer NAL then finds no open batch and takes the path it takes in the files that always played.
+Checked before it is written; the code is the same in every firmware we have a dump of. Details:
+[docs/TECHNICAL.md](docs/TECHNICAL.md), Part 2b-3.
+
 ## Tests
 
 All tests were run on one Oppo UDP-203 with the RU 65-0131 jailbreak, connected through an AV receiver to a Dolby
@@ -1198,6 +1243,31 @@ MP4 copy.
 Not tested: other TVs, players other than the RU one (simulated only), Dolby Vision discs, VobSub / PGS subtitles
 in the bars of a Dolby Vision file, L10.
 
+### Starting and stopping files (v2.0.1)
+
+RU player on an LG C1, files started over the network API and stopped with the remote-control command, the kernel
+log read at every stop.
+
+| Test | Result |
+|---|---|
+| v2.0.0-beta: profile 7 FEL files (MKV, and MKV after MP4) started and stopped one after the other | a start hung at 0:00 within 2 to 7 starts, in each of six runs |
+| ... the same loop with only the multi-core reset of the profile 7 patch taken out | 22 starts, none hung |
+| v2.0.1-beta: one of those MKVs (2 minutes, no audio) started and stopped in a loop | 22 starts, none hung |
+| v2.0.1-beta: 14 jumps in that file, 10 in another profile 7 MKV, 8 each in a profile 7 and a profile 8 MP4 | all continue in Dolby Vision; the reset still runs after jumps (counter in `p7kel.sh status`) |
+| Stock demuxer: two MP4s with audio (profile 8, profile 7), played 10 s and stopped in turn | the audio filter stays allocated at about every second stop; the next file hangs (kernel oops) |
+| With `ftrfix.sh`: the same, 8 stops | 2 stops needed the patch (filter disabled in the disconnect, then freed), 6 were right by themselves; no hang |
+| Stock demuxer: the profile 7 MP4 from the report (x265, 6 frames per chunk) | stops after about a second |
+| With `mp4elfix.sh`: the same file | plays in Dolby Vision with FEL; 10 jumps; plays to its end and the next file starts |
+| Copies of that file with 1 frame per chunk, or without the suffix SEI of the base layer | play on stock too |
+| Installed from the zip, after a reboot: 18 files in a row (profile 7 MKV and MP4, profile 8 MP4 and MKV, profile 5, TS, an H.264 MP4, TrueHD), each played and stopped | all start, Dolby Vision where expected, every stop clean |
+| A profile 7 MKV made by mkvmerge from a dual-layer MP4 (`hvcE` record after the Dolby Vision one) | Dolby Vision with FEL; was HDR10 |
+| `ftrfix.sh` and `mp4elfix.sh` on the demuxer images of every player we have a dump of (RU, three USA players, Cambridge CXUHD), simulated | check, on, on again, off: as expected, and `off` gives back the original bytes; both fit beside `hvccfix.sh` |
+| The new `p7kel.sh` on the driver images of those players, simulated | on / off as expected; with the v2.0.0-beta patch active it reports `sites old` and waits for the next boot |
+| Installer, offline: every earlier scenario, plus updating from v2.0.0-beta and going back | all pass (93 steps) |
+
+Not tested: an MP4 whose enhancement-layer parameter sets are only in the `hvcE` box; long films in profile 7 MP4;
+players other than the RU one (simulated only).
+
 ### Extras (v1.7.1)
 
 | Test | Result |
@@ -1297,6 +1367,8 @@ program if that file exists. The installer puts there:
 /mnt/ubi_boot/oppo-dv-mkv/dvexit.sh   kernel patch, Dolby Vision left on after playback, black menu (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/dvcm.sh     kernel patch, TV-led Dolby Vision metadata: CM 2.9, CM 4.0, L5 (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/hvccfix.sh  kernel patch, MKVs without VPS/SPS/PPS in the hvcC (on|off|status|check)
+/mnt/ubi_boot/oppo-dv-mkv/ftrfix.sh   kernel patch, hang at the next file after a stopped MP4 (on|off|status|check)
+/mnt/ubi_boot/oppo-dv-mkv/mp4elfix.sh kernel patch, profile 7 MP4s that stop after a second (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/subs.sh     subtitle patch (one layout per regional v65 player program; check)
 /mnt/ubi_boot/oppo-dv-mkv/image_bdp83.bin  subtitle colour menu image, built at install time, swapped into /res at boot
 /mnt/ubi_boot/oppo-dv-mkv/alacdec.bin, bdpaudec.db  ALAC audio decoder of firmware 56/60 and the player's audio decoder
@@ -1366,6 +1438,28 @@ requests.
 </p>
 
 ## Changelog
+
+- **v2.0.1-beta: hangs when a file starts; profile 7 MP4s that stop after a second.** A beta: tested on one
+  player (RU) and one TV (LG C1).
+  - **Profile 7 MKV hangs at 0:00 when it starts (a fault of this project's profile 7 patch, since v1.3.1).** The
+    patch resets the decoder's multi-core block for the enhancement layer after a seek. It also did so when a file
+    started, where the reset can hit the base-layer decoder while it is starting; the base layer then never
+    decodes a picture and the player hangs until it is power-cycled. Short clips started one after the other showed
+    it within a few starts. The reset now runs only after a seek, chapter skip or track change, and waits while
+    the base-layer decoder is using the hardware.
+  - **Hang at the loading screen of the next file after an MP4 with audio was stopped** (Oppo's bug, also on
+    stock): the audio stream's demuxer filter was sometimes not freed. `ftrfix.sh`, two instructions. See
+    [fix 25](#25-player-hangs-at-the-next-file-after-an-mp4-was-stopped-v201).
+  - **Profile 7 MP4 (both layers in one track) from x265 stops after a second** (Oppo's bug, also on stock): the
+    MP4 demuxer counted the first enhancement-layer NAL twice. `mp4elfix.sh`. See
+    [fix 26](#26-profile-7-mp4-stops-a-second-after-it-starts-v201).
+  - **Profile 7 MKV made from a dual-layer MP4 played as HDR10:** mkvmerge writes the enhancement layer's `hvcE`
+    record after the Dolby Vision record, and our MKV hook read the second one as the Dolby Vision record. It now
+    reads only `dvcC` / `dvvC`.
+  - CM 4.0 from v2.0.0-beta is unchanged. The report "CM 4.0 not passing" came from test clips that hit the faults
+    above before any metadata was sent.
+  - Updating from v2.0.0-beta adds `ftrfix.sh` and `mp4elfix.sh` and replaces `p7kel.sh`, `dvhook.sh` and
+    `dvmkv.sh`. Power-cycle after installing (as always): the new profile 7 patch starts at the next boot.
 
 - **v2.0.0-beta: the Dolby Vision metadata the TV gets in TV-led mode; black menu after a Dolby Vision film.**
   A beta: tested on one player (RU) and one TV (LG C1). Both are Oppo's bugs, also on stock firmware.

@@ -21,6 +21,8 @@ if [ -f $D/hvccfix.sh ]; then   # MKVs whose hvcC has no VPS/SPS/PPS (kernel); D
   h=$(sh $D/hvccfix.sh on 2>&1); r=$?; echo "$h" | while read l; do log "hvccfix: $l"; done
   [ $r = 0 ] && sh $D/dvhook.sh hvcc on 2>&1 | while read l; do log "dvhook: $l"; done
 fi
+[ -f $D/ftrfix.sh ] && sh $D/ftrfix.sh on 2>&1 | while read l; do log "ftrfix: $l"; done     # hang at the next file after an MP4 with audio was stopped (kernel)
+[ -f $D/mp4elfix.sh ] && sh $D/mp4elfix.sh on 2>&1 | while read l; do log "mp4elfix: $l"; done   # profile 7 MP4s that stop after a second (kernel)
 if [ -f $D/dvhook.sh ] && [ -f $D/languages.txt ]; then   # MP4: which 8 audio/subtitle tracks to keep (languages.txt)
   c=$(tr -d '\r' < $D/languages.txt | grep -v '^[[:space:]]*#' | awk 'NF{print $1}')
   [ -n "$c" ] && sh $D/dvhook.sh langs $c 2>&1 | while read l; do log "dvhook: $l"; done

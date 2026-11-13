@@ -79,7 +79,12 @@ clr_entry:                                  @ vESM_FifoClear 0x7e9fd48c (r4 hand
     .section .cave2,"ax"
     .global vdp_gate
 vdp_gate:                                   @ VDec_Stop entry 0x7eaac99c (r0 esid): the EL plane fix (vdp_entry) only in
-    ldr ip, =0x7ee6e73c + DSHIFT            @ single-stream DV; ESID 1 (EL) EsInfo
+    ldr ip, =c2stat                         @ single-stream DV. A full stop also ends a pending "restart after a
+    push {r0}                               @ same-stream stop" (see mc_stub).
+    mov r0, #0
+    str r0, [ip, #16]
+    pop {r0}
+    ldr ip, =0x7ee6e73c + DSHIFT            @ ESID 1 (EL) EsInfo
     ldr ip, [ip]
     cmp ip, #0
     beq 1f
@@ -96,6 +101,8 @@ nofb_stub:                                  @ fgVDecInitProc "ReInit From SSStop
     mov r2, #0                              @ left at 1 by a stop that landed between "free frame buffer found" and
     strb r2, [ip, #0x9c]                    @ "decode", it made the first picture after the restart skip its
     mov r2, #1                              @ frame-buffer setup ("No empty OutFbInfo") and be lost
+    ldr ip, =c2stat
+    str r2, [ip, #16]                       @ restart after a same-stream stop: mc_stub may reset the cores
     bx lr
     .global mc_stub
 mc_stub:                                    @ i4H265_Parse_Syntax_Proc 0x7eb26968 'bne' (EsInfo+0x65012 != 1: single-core ES)
@@ -103,18 +110,29 @@ mc_stub:                                    @ i4H265_Parse_Syntax_Proc 0x7eb2696
     bne 1f
     single r3, r4
     bne 1f
-    ldr r3, [r4, #0x10]                     @ r4 = EsInfo: pictures since the (re)start
-    cmp r3, #1
+    ldr r0, =c2stat
+    ldr r3, [r0, #16]                       @ only on the restart after a same-stream stop (seek, chapter skip, audio or
+    cmp r3, #0                              @ subtitle change; set by nofb_stub). A file start follows a full stop, which
+    beq 1f                                  @ has reset the cores; a reset there can land in the BL's first header parse:
+    ldr r3, [r4, #0x10]                     @ the BL then never starts and the player hangs at 0:00 (v2.0.1-beta).
+    cmp r3, #1                              @ r4 = EsInfo: pictures since the (re)start
+    movhi r3, #0
+    strhi r3, [r0, #16]                     @ the EL is running again: restart handled
     bhi 1f
     ldr r3, =0x7ee6e738 + DSHIFT            @ ESID 0 (BL) EsInfo
     ldr r3, [r3]
-    ldr r3, [r3]                            @ BL decoder state 5 = decoding: leave the cores alone
-    cmp r3, #5
+    mov r1, #0x200000                       @ BL decoder state 2 = header parse, 4 = picture start: it is using the
+2:  ldr r2, [r3]                            @ hardware, wait for it (a few ms; bounded)
+    cmp r2, #2
+    cmpne r2, #4
+    bne 3f
+    subs r1, r1, #1
+    bne 2b
+3:  cmp r2, #5                              @ BL decoder state 5 = decoding: leave the cores alone
     beq 1f
-    ldr r3, =c2stat
-    ldr r0, [r3]
-    add r0, r0, #1
-    str r0, [r3]
+    ldr r1, [r0]
+    add r1, r1, #1
+    str r1, [r0]
     mov r0, r5                              @ r5 = VLD id
     bl vVDecResetMultiCore                  @ the BL (dual core) does this before every picture and a full stop does it
 1:  b mc_cont                               @ (vH265ReleaseProc); a same-stream stop that interrupts a BL picture does not,
@@ -189,8 +207,8 @@ eos_stub:                                   @ fgVDecRetrieveEsIsPic 0x7eabb880 (
     .ltorg
     .section .cave2d,"aw"
     .global c2stat
-c2stat:                                     @ multi-core resets, VDP0 frame at restart, EL frames held back, EL end of stream
-    .word 0, 0, 0, 0
+c2stat:                                     @ multi-core resets, VDP0 frame at restart, EL frames held back, EL end of stream,
+    .word 0, 0, 0, 0, 0                     @ restart after a same-stream stop pending
     .section .data.st,"aw"
     .global elstat
 elstat:

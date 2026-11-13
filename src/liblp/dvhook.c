@@ -47,17 +47,20 @@ void dv_peek(u8 *p, u32 base) {
     u8 ls = 0, buf[128];
     u64 len = ((getlen_t)(base + VA_GETLEN))(p, &ls);
     if (len < sizeof buf) {
-        u32 n = (u32)len, i = 0, type = 0, got = 0;
+        u32 n = (u32)len, i = 0, type = 0, got = 0; u8 rec[24];
         loadbyte_t lb = (loadbyte_t)(base + VA_LOADBYTE);
         for (u32 k = 0; k < n; k++) buf[k] = (u8)lb(p);
         while (i < n) {
             u32 id = rd_vint(buf, n, &i, 1), sz = rd_vint(buf, n, &i, 0);
             if (id == 0xffffffffu || sz == 0xffffffffu || i + sz > n) break;
             if (id == 0x41e7 && sz <= 4) { type = 0; for (u32 k = 0; k < sz; k++) type = (type << 8) | buf[i + k]; }
-            if (id == 0x41ed && sz >= 4) { for (u32 k = 0; k < 24; k++) s->rec[k] = k < sz ? buf[i + k] : 0; got = 1; }
+            if (id == 0x41ed && sz >= 4) { for (u32 k = 0; k < 24; k++) rec[k] = k < sz ? buf[i + k] : 0; got = 1; }
             i += sz;
         }
+        /* only the Dolby Vision record: another mapping of the track (mkvmerge writes the EL's 'hvcE' after 'dvcC')
+         * must not replace it */
         if (got && (type == FOURCC('d','v','c','C') || type == FOURCC('d','v','v','C'))) {
+            for (u32 k = 0; k < 24; k++) s->rec[k] = rec[k];
             s->parser = (u32)p; s->have = 1;
         }
     }

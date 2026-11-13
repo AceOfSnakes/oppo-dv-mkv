@@ -22,6 +22,8 @@ The hardware is a MediaTek MT8581 (4× Cortex-A9) running Linux 3.10.
 | 4:3 / 16:9 flag of SD files in Source Direct (v1.9.0) | `bdpdrv1` kernel module (via `/dev/mem`), one call + a 17-word stub | `src/kernel/arflag.sh` | `src/kernel/arflag.S` |
 | Dolby Vision left on after playback (v2.0.0) | `bdpdrv1` kernel module (via `/dev/mem`), one instruction + an 18-word stub | `src/kernel/dvexit.sh` | `src/kernel/dvexit.S` |
 | MKVs without parameter sets in the hvcC (v1.7.0) | `splitter.ko` kernel module (via `/dev/mem`), one branch + a 16-instruction stub | `src/kernel/hvccfix.sh` | `src/kernel/hvcc.S` |
+| Next file hangs after a stopped MP4 with audio (v2.0.1) | `splitter.ko` kernel module (via `/dev/mem`), two instructions | `src/kernel/ftrfix.sh` | none |
+| Profile 7 MP4 that stops after a second (v2.0.1) | `splitter.ko` kernel module (via `/dev/mem`), one branch + an 8-instruction stub | `src/kernel/mp4elfix.sh` | `src/kernel/mp4el.S` |
 | ALAC decoder of firmware 56/60 (v1.7.0) | `/res/bdpaudec.db` (symlink swapped by the boot wrapper) | `install.sh` builds it | `src/audio/alacdec.bin` |
 | Better subtitles | running `bdpprog.1` + `liblp.so` (RU 65-0131 program) | `subs.sh` | `src/subtitles/` |
 | Factory menu shortcut | running `bdpprog.1` (RU 65-0131 or jb_overlay V3 program) | `fpage.sh` | `src/factory-menu/` |
@@ -424,6 +426,16 @@ emptied the EL plane are fixed:
   Timeout`, `cur FBId:255`) and the EL resumes about a second later, at its next I picture. Seen in 19 of 20 such
   skips, against 1 of 81 otherwise. The stub makes the EL decoder (ES 1) do the same reset while its picture count
   (`+0x10`) is at most 1, unless the BL is decoding at that moment (state 5).
+  **v2.0.1:** up to v2.0.0-beta the stub also ran at every file start (picture count 0 or 1 there too). A file start
+  follows a full stop, which has reset the block, so nothing is gained; and the BL decoder is then in its first
+  header parse (state 2), not in state 5, so the reset was not held back. When it hit, the BL logged its first
+  access unit and RPU and then nothing more (no `[RM-0]` resource decision, no LAE connect, no `u4H265NotiHdrInfo`
+  for ES 0), the EL went on alone, the shared FIFO filled and the player hung at 0:00; `VDec_Stop` for ES 0 never
+  finished. With FEL clips started and stopped one after the other: a hang within 7 starts in each of six runs; 0 in 22 with
+  the site restored; 0 in 22 with the new stub. Now `nofb_stub` (which runs exactly on "ReInit From SSStop") sets a
+  flag in `c2stat+16`, `vdp_gate` (entry of `VDec_Stop`, a full stop) clears it, and `mc_stub` resets only while it
+  is set, clearing it once the EL has more than one picture. Before the reset it waits (bounded loop) while the BL
+  decoder is in state 2 (header parse) or 4 (picture start), then skips if it is in state 5 as before.
 - **`rec_stub` / `cmp_stub` (frozen BL frame).** VDP1 times each EL frame against the frame VDP0 shows now
   (`EL − BL` PTS: < 0 late = dropped, 0 shown, > 0 wait; dovi threshold at `0x7ed2d3d8+0x30`). After a same-stream
   stop VDP0 keeps showing its last pre-seek frame until the first new BL frame is due. After a backward jump that
@@ -474,7 +486,7 @@ switched with the other hooks by `p7kel.sh on|off`.
 | 4096 | EL FIFO clear |
 
 `p7kel.sh status` prints the sites state (`ok`, `off`, or `old` when an older release's patch is active), the
-first 32 bytes of `elstat`, and `seek=` with the four cave-2 counters (`c2stat`, `0x7e94d3d0`), all zero on discs: EL multi-core resets, the VDP0 frame recorded
+first 32 bytes of `elstat`, and `seek=` with the five cave-2 words (`c2stat`, `0x7e94d418` since v2.0.1; the fifth is the "restart after a same-stream stop" flag), all zero on discs: EL multi-core resets, the VDP0 frame recorded
 at the last restart (0 once VDP0 moved on), EL frames held back from the frozen frame, and end-of-stream messages
 flagged (one per file played to the end).
 
@@ -559,6 +571,67 @@ bytes. The cave is written first, then the site.
 Debugging: the demuxer's MKV log switches are bytes in its `.bss` (`/sys/module/splitter/sections/.bss`):
 `_fgCfaMkvDbgVideoLog` `+0x2723` and `_fgCfaMkvDbgLog` `+0x2725` (1 = on). With them on, an affected file logs
 `prCfaMkvInst->uArraysNs : 0x0` before the error.
+
+## Part 2b-2: splitter.ko (next file hangs after a stopped MP4 with audio, `ftrfix.sh`, v2.0.1)
+
+Each stream has a demuxer filter (`Ftrh 0x2340000` video, `0x2340001` audio, ...; table of 0x44-byte entries) with a
+parser filter slot (`Pfrh`) behind it: log lines `[LPDMX][FTR] FTR set Pfr, Ftrh: .. Pfrh: ..`. At a stop the
+middleware sends `DEMUX_SET_TYPE_CTRL` (disable: `i4FilterIfSetDisable`, log `diable ftr:2340001`) and later
+disconnects the component (`_FtrMw_Disconnect` -> `i4FilterIfDisconnectSpt`, `.text+0x2d830`), which does
+
+    if (fgFilterIsEnable(ftr) == 0 && i4Filter2PfrDelete(ftr) == 0 && i4SplitterIfDisconnectFtr(..) >= 0 ...)
+
+With MP4 the audio stream handler of `bdpprog` sometimes never sends the disable for the audio filter (the video
+one always comes). The filter is still enabled at the disconnect, `i4Filter2PfrDelete` is not called
+(no `i4PSR_Filter_Destroy, u4FilterHandle:0x1`, no `Pfrh: 0xffffffff` for `0x2340001`) and the slot leaks. At the
+next start `0x234000c` / `0x2340010` get Pfr 2 / 3 instead of 1 / 2 and a handle of -1 is used as an index:
+`Unable to handle kernel paging request` in `u4FilterGetPfrHandle+0x10` (from `i4Filter2PfrConnectPsr`) or
+`vFilterUpdateSyncUser+0x20`. Reproduced on the stock demuxer with nothing of ours loaded in it.
+
+The patch, both in `i4FilterIfDisconnectSpt`:
+
+| Site | Original | Patched |
+|---|---|---|
+| `+0x2d870` | `bl fgFilterIsEnable` (`46faffeb`) | `bl i4FilterIfSetDisable` (`a60000eb`, `+0x2db10`) |
+| `+0x2d878` | `bne` fail (`f2ffff1a`) | `nop` (`0000a0e1`) |
+
+`i4FilterIfSetDisable` tests `fgFilterIsEnable` itself and returns -1 at once for a disabled filter; for an enabled
+one it disables the stream in the demuxer and the parser filter, as the middleware's own disable does. Its result
+is ignored and the function goes on to `i4Filter2PfrDelete`. `ftrfix.sh` checks the whole disconnect function and
+the 96 bytes of `i4FilterIfSetDisable` before writing.
+
+## Part 2b-3: splitter.ko (profile 7 MP4 that stops after a second, `mp4elfix.sh`, v2.0.1)
+
+`vCfaMp4TxAvcPayload2Fifo` (`.text+0x44eb0`) walks the length-prefixed NALs of a sample. NALs below a size limit
+(`inst+0x308`) are collected into a batch: `inst+0xd32` batch open, `+0xd34` entry count, `+0xd38` bytes, `+0xd40`
+entries; `inst+0xd10` (u64) is "bytes left in this sample". `inst+0x22eb` = "EL header pending", set at every uninit.
+When a NAL header reads `7e 01` (the EL wrapper) with `22eb` set, the code at `+0x450a4` sets `22ea` and clears
+`22eb`; `22ea` makes the demuxer leave the payload state for state 0x10 (`vCfaMp4TXELHeader2Fifo`: the parameter
+sets of the `hvcE` box, one packet per call) and come back.
+
+Without an open batch that detour is clean. With one (an x265 stream has a suffix SEI, NAL type 40, after the BL
+slice, small enough to open a batch), the code at `+0x45cf0` takes the EL NAL back out of the batch (count - 1,
+bytes - length) but leaves its length + prefix subtracted from `+0xd10`. After the detour the NAL is read and
+subtracted again. At the last NAL of the sample (the RPU) `length + prefix <= left` fails by exactly the size of
+that first EL NAL: `x_thread_delay(5000)`, demux error, flush. The BL decoder then logs `Rpu Type 0x00400000 is not
+right` on a stray queue entry and decodes EL data as base layer, and the application stops the file. Files with one
+sample per chunk never batch; a file whose BL has no suffix SEI has no open batch at the first EL NAL.
+
+Three other ways were tried and dropped (giving the bytes back, never taking the detour, taking it later): the EL
+header has to reach the parser before any EL data, or a later stop leaves the next profile 7 file hanging. The
+patch keeps that order:
+
+| Site | Original | Patched |
+|---|---|---|
+| `+0x453d4` | `ldrb r3, [r6, r5]` (`0530d6e7`; r5 = 0x22ea, nonzero = do not batch) | `b` stub (`626d00ea`) |
+
+The stub (`mp4el.S`, 8 words at `+0x60964`, in `cli_cfamkv_debug_off` behind the `hvccfix.sh` stub; these 8 original
+words hold no addresses, so they are kept in the script) loads `22ea` as before and, when that is 0 in a Dolby
+Vision file (`inst+4`), loads `22eb` instead: no batching while the EL header is pending. Side effect: in a Dolby
+Vision MP4 without wrapped EL NALs (profile 5 / 8, or a profile 7 file with unwrapped EL) `22eb` is never cleared
+and the file is not batched at all; such files played and seeked normally in our tests. `mp4elfix.sh` checks the
+code that arms the detour, the batch test around the site, the un-add at `+0x45cf0` and the code behind the cave.
+`build.sh` assembles `mp4el.S` and checks it against the hex in the script.
 
 ## Part 2c: bdpdrv1 (non-square pixels stretched to 16:9, `sarfix.sh`, v1.7.0)
 
