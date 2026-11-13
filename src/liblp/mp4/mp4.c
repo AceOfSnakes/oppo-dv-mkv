@@ -64,11 +64,13 @@ struct st {
     u32 scan[4];     /* last pre-scan: reads, tracks, audio candidates << 16 | subtitle candidates, skipped */
     u8 tk_tid, nsd;  /* last tkhd's track_ID; VobSub frame sizes kept in sd[] */
     u16 tk_w, tk_h;  /* last tkhd's width and height (integer pixels) */
-    u8 pgmix, rsv;   /* the MKV being played has PGS and other subtitle formats (pg_mode; ST_PGMIX in shims.S) */
+    u8 pgmix;        /* the MKV being played has PGS and other subtitle formats (pg_mode; ST_PGMIX in shims.S) */
+    u8 pgsync;       /* the PG decoder has been given a display set it can start from (pg_feed; 0 again in p_start) */
     struct { u8 tid, rsv; u16 w, h, rsv2; } sd[SLOTS];   /* 'subp' (VobSub) tracks: frame size from their tkhd */
+    u32 sps;         /* the subtitle decoder whose PG decoder is running (p_start / p_tset; ST_SPS in shims.S) */
 };
 #define ST(base) ((volatile struct st *)((base) + ST_VA))
-_Static_assert(__builtin_offsetof(struct st, pgmix) == 0xe6 && sizeof(struct st) == 0x128, "struct st layout (shims.S, mkinstall.py)");
+_Static_assert(__builtin_offsetof(struct st, pgmix) == 0xe6 && __builtin_offsetof(struct st, pgsync) == 0xe7 && __builtin_offsetof(struct st, sps) == 0x128 && sizeof(struct st) == 0x12c, "struct st layout (shims.S, mkinstall.py)");
 
 struct langmsg { u32 type; u16 idx; u8 c[3]; };
 typedef void (*send_t)(void *obj, u32 msg, void *data);
@@ -232,15 +234,25 @@ CAVE4 void pg_feed(void **esh, u32 base) {
     u8 *d = (u8 *)(b + 1);
     for (g = f, o = 0; g; g = g->next) for (l = 0; l < g->n; l++) d[o++] = g->p[l];
     for (o = 0; o + 3 <= total && (l = 3 + (d[o + 1] << 8 | d[o + 2])) <= total - o; o += l) n++;
+    /* After a start or a seek the PG decoder skips display sets until one it can start from (epoch start or
+     * acquisition point), and after skipping one it sets no timer for the sets it already holds until more data
+     * arrives (Oppo bug; a transport stream always brings more): in an MKV that is up to 6 s later, and every line in
+     * between was lost. Half of all seeks land on such a set (the "clear" after a line). Give the decoder an empty
+     * epoch start instead: it clears the screen, which is all such a set can do without the sets before it. */
+    if (n && d[0] == 0x16 && (d[1] << 8 | d[2]) >= 11) {
+        if (d[10] & 0xc0) ST(base)->pgsync = 1;
+        else if (!ST(base)->pgsync) { d[10] = 0x80; d[11] = 0; d[13] = 0; }
+    }
     struct pgpk *k = n ? ((alloc_t)(base + VA_ALLOC))(n * sizeof *k) : 0;
     if (!k) { ((free_t)(base + VA_FREE))(b); goto raw; }
     b->magic = PG_MAGIC; b->esh = esh; b->left = n; b->pk = k;
     u64 pts = *(u64 *)((u8 *)esh + ESH_PTS);
     for (o = 0, l = 0; l < n; l++, k++) {
-        u32 sl = 3 + (d[o + 1] << 8 | d[o + 2]);
+        u32 sl = 3 + (d[o + 1] << 8 | d[o + 2]), fl = sl;
+        if (d[o] == 0x16 && sl >= 14 && !d[o + 13]) { fl = 14; d[o + 1] = 0; d[o + 2] = 11; }   /* no objects (see above) */
         k->f = &k->f1; k->next = 0; k->magic = PG_MAGIC; k->b = b;
         k->f1.p = k->h; k->f1.n = 19; k->f1.next = &k->f2;
-        k->f2.p = d + o; k->f2.n = sl; k->f2.next = 0;
+        k->f2.p = d + o; k->f2.n = fl; k->f2.next = 0;
         k->h[0] = 0; k->h[1] = 0; k->h[2] = 1; k->h[3] = 0xbd; k->h[4] = 0; k->h[5] = 0;
         k->h[6] = 0x80; k->h[7] = 0xc0; k->h[8] = 10;
         pes_ts(k->h + 9, 0x30, pts); pes_ts(k->h + 14, 0x10, pts);

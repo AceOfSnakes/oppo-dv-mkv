@@ -30,7 +30,7 @@ CAVE3, CAVE3_LEN = 0x530de8, 0x9e4                       # vMPCTestDvdRwdSpeedTh
 CAVE3_ORIG = 'f04f2de914d04de2fc789fe5fc389fe5'          # its first 16 bytes in liblp e39b358c
 CAVE4, CAVE4_LEN = 0x53f4c4, 0x7fc                       # vMPCTestOperation1
 CAVE4_ORIG = 'ff472de94c879fe54c379fe508808fe0'          # its first 16 bytes in liblp e39b358c
-ST2, ST2LEN = 0x757e80, 0x128                            # mp4.c struct st
+ST2, ST2LEN = 0x757e80, 0x12c                            # mp4.c struct st
 assert len(blob) <= 0x400 and len(blob2) <= CAVE2_LEN and len(blob3) <= CAVE3_LEN and len(blob4) <= CAVE4_LEN and ST + STLEN <= ST2 and ST2 + ST2LEN <= 0x758000
 hx = lambda b: ''.join('\\x%02x' % c for c in b)
 
@@ -69,6 +69,11 @@ code.append((0x57e36c, struct.pack('<I', 0x1a000003), bl(0x57e36c, syms2['p_scr'
 # PG decoder clock (Oppo bug: given 90 kHz where it counts in 45 kHz, and a stale start time after a seek).
 code.append((0x58affc, bl(0x58affc, 0x163f8c), bl(0x58affc, syms2['p_texp'])))               # bl TSFile_TimeExpired
 code.append((0x573908, bl(0x573908, 0x14b4d0), bl(0x573908, syms2['p_start'])))              # bl TSFile_Start
+# The PG decoder's timers: wake the subtitle decoder's thread when one is set (p_tset), and mark the timer done before
+# the PG decoder is told, not after (p_texp + nop): real Blu-ray tracks showed lines seconds late or not at all.
+code.append((0x58ab0c, bl(0x58ab0c, 0x1563c0), bl(0x58ab0c, syms2['p_tset'])))               # bl vSpsDbgMsg
+code.append((0x58b018, struct.pack('<I', 0xe5c40028), struct.pack('<I', 0xe1a00000)))        # strb r0, [r4, #0x28] -> nop
+code.append((0x57aee8, bl(0x57aee8, 0x169a4c), bl(0x57aee8, syms2['p_need'])))               # bl fgSpsDecStateNeedTrigger
 # data sites, absolute addresses (runtime base + VA): (word VA, accepted original VAs, new VA)
 data = [(0x6ee3a4, [0x402628], syms2['m_moov']),             # MP4 box dispatch table: moov handler
         (0x6ee2a0, [0x402920], syms2['m_mdhd']),             # MP4 box dispatch table: mdhd handler

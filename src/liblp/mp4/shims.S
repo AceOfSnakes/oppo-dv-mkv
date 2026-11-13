@@ -176,6 +176,7 @@ p_done:
 
 @ MKVs with PGS and other subtitle formats (see pg_mode in mp4.c). ST_PGMIX = struct st .pgmix.
 .equ ST_PGMIX, 0x757e80 + 0xe6
+.equ ST_SPS, 0x757e80 + 0x128
 .macro GETMIX                  @ pgmix -> r1 (flags set), clobbers r2
     GETBASE
     ldr r2, =ST_PGMIX
@@ -222,6 +223,8 @@ p_scr:
 @ the read-ahead burst then shows and clears a subtitle at once (the first one was lost). p_texp replaces
 @ "bl TSFile_TimeExpired" in mrTsSpsDecoder (0x58affc; r0:r1 = when, r2:r3 = now, both 90 kHz): halve both.
 p_texp:
+    mov ip, #0
+    strb ip, [r4, #0x28]       @ timer no longer pending (see p_tset); r4 = rSpsTsData
     lsrs r1, r1, #1
     rrx r0, r0
     lsrs r3, r3, #1
@@ -231,6 +234,59 @@ p_texp:
 @ "bl TSFile_Start" in mrSpsDcmdPlay (0x573908; r0:r1 = the clock when the decoder is started, 90 kHz, and after a
 @ seek still the position before it): start the PG decoder's clock at 0, so every display set gets a timer.
 p_start:
+    push {r2}
+    GETBASE
+    ldr r2, =ST_SPS
+    str r4, [r1, r2]           @ r4 = the subtitle decoder (for p_tset)
+    ldr r2, =ST_PGMIX + 1      @ .pgsync = 0: the PG decoder starts from scratch (pg_feed)
+    mov r0, #0
+    strb r0, [r1, r2]
+    pop {r2}
     mov r0, #0
     mov r1, #0
     b TSFile_Start
+
+@ The PG decoder asks for a call at a time (SpsTsPgTimeSetCb, on its own thread): stock only notes the time, and the
+@ subtitle decoder's thread looks at it when it next wakes up, which is when the next subtitle data arrives (Oppo bug).
+@ A real Blu-ray track queues the "clear" and the next line together, so the second timer waited for the data of the
+@ line after it: lines appeared seconds late, or were cleared before they were ever shown. And mrTsSpsDecoder marked
+@ the timer as done AFTER telling the PG decoder, wiping a timer set meanwhile (p_texp does it before; the stock
+@ store at 0x58b018 is a nop now). p_tset replaces "bl vSpsDbgMsg" at the end of SpsTsPgTimeSetCb (0x58ab0c): wake
+@ the subtitle decoder's thread, as its own timer does (event 0x10).
+p_tset:
+    GETBASE
+    ldr r2, =ST_SPS
+    ldr r0, [r1, r2]
+    cmp r0, #0
+    bxeq lr
+    ldr r1, [r0]
+    cmp r1, #0
+    bxeq lr
+    mov r1, #0x10
+    b mrSpsThreadTriggerEvtSetEx
+
+@ One wake-up is not always enough: right after a start the thread is busy switching the subtitle on and drops it.
+@ p_need replaces "bl fgSpsDecStateNeedTrigger" in mrSpsDecStateProc (0x57aee8, r0 = subtitle decoder): while the PG
+@ decoder waits for a timer and the decoder plays (state 1), the thread keeps itself going, as it does for a text
+@ or VobSub line that is waiting for its time.
+p_need:
+    push {r4, lr}
+    mov r4, r0
+    bl fgSpsDecStateNeedTrigger
+    cmp r0, #0
+    popne {r4, pc}
+    GETBASE
+    ldr r2, =rSpsTsData
+    add r2, r2, r1
+    ldrb r3, [r2, #0x28]
+    cmp r3, #0
+    popeq {r4, pc}             @ no timer pending: r0 = 0
+    push {r0, r1}
+    mov r0, r4
+    mov r1, sp
+    bl mrSpsDecGetState
+    pop {r0, r1}               @ r0 = state
+    cmp r0, #1
+    movne r0, #0
+    pop {r4, pc}
+    .ltorg
