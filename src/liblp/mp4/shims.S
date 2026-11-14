@@ -270,17 +270,20 @@ p_tset:
 @ decoder waits for a timer and the decoder plays (state 1), the thread keeps itself going, as it does for a text
 @ or VobSub line that is waiting for its time.
 p_need:
-    push {r4, lr}
+    push {r4, r5, r6, lr}
     mov r4, r0
+    GETBASE
+    mov r5, r1
+    bl tx_end                  @ (decoder, base): end of the MP4 text line on screen (see mp4.c)
+    mov r0, r4
     bl fgSpsDecStateNeedTrigger
     cmp r0, #0
-    popne {r4, pc}
-    GETBASE
+    popne {r4, r5, r6, pc}
     ldr r2, =rSpsTsData
-    add r2, r2, r1
+    add r2, r2, r5
     ldrb r3, [r2, #0x28]
     cmp r3, #0
-    popeq {r4, pc}             @ no timer pending: r0 = 0
+    popeq {r4, r5, r6, pc}     @ no timer pending: r0 = 0
     push {r0, r1}
     mov r0, r4
     mov r1, sp
@@ -288,5 +291,5 @@ p_need:
     pop {r0, r1}               @ r0 = state
     cmp r0, #1
     movne r0, #0
-    pop {r4, pc}
+    pop {r4, r5, r6, pc}
     .ltorg

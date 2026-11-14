@@ -30,7 +30,7 @@ CAVE3, CAVE3_LEN = 0x530de8, 0x9e4                       # vMPCTestDvdRwdSpeedTh
 CAVE3_ORIG = 'f04f2de914d04de2fc789fe5fc389fe5'          # its first 16 bytes in liblp e39b358c
 CAVE4, CAVE4_LEN = 0x53f4c4, 0x7fc                       # vMPCTestOperation1
 CAVE4_ORIG = 'ff472de94c879fe54c379fe508808fe0'          # its first 16 bytes in liblp e39b358c
-ST2, ST2LEN = 0x757e80, 0x12c                            # mp4.c struct st
+ST2, ST2LEN = 0x757e80, 0x134                            # mp4.c struct st
 assert len(blob) <= 0x400 and len(blob2) <= CAVE2_LEN and len(blob3) <= CAVE3_LEN and len(blob4) <= CAVE4_LEN and ST + STLEN <= ST2 and ST2 + ST2LEN <= 0x758000
 hx = lambda b: ''.join('\\x%02x' % c for c in b)
 

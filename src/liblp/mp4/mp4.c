@@ -68,9 +68,11 @@ struct st {
     u8 pgsync;       /* the PG decoder has been given a display set it can start from (pg_feed; 0 again in p_start) */
     struct { u8 tid, rsv; u16 w, h, rsv2; } sd[SLOTS];   /* 'subp' (VobSub) tracks: frame size from their tkhd */
     u32 sps;         /* the subtitle decoder whose PG decoder is running (p_start / p_tset; ST_SPS in shims.S) */
+    short pgdy;      /* lines the current PGS epoch is moved down (Subtitle Shift; pg_feed) */
+    u32 prov;        /* end time given to the tx3g line on screen for want of a next sample (mp4_srt / tx_end); 0 = none */
 };
 #define ST(base) ((volatile struct st *)((base) + ST_VA))
-_Static_assert(__builtin_offsetof(struct st, pgmix) == 0xe6 && __builtin_offsetof(struct st, pgsync) == 0xe7 && __builtin_offsetof(struct st, sps) == 0x128 && sizeof(struct st) == 0x12c, "struct st layout (shims.S, mkinstall.py)");
+_Static_assert(__builtin_offsetof(struct st, pgmix) == 0xe6 && __builtin_offsetof(struct st, pgsync) == 0xe7 && __builtin_offsetof(struct st, sps) == 0x128 && __builtin_offsetof(struct st, pgdy) == 0x12c && __builtin_offsetof(struct st, prov) == 0x130 && sizeof(struct st) == 0x134, "struct st layout (shims.S, mkinstall.py)");
 
 struct langmsg { u32 type; u16 idx; u8 c[3]; };
 typedef void (*send_t)(void *obj, u32 msg, void *data);
@@ -223,6 +225,35 @@ static void pes_ts(u8 *h, u32 mark, u64 t) {
     h[3] = t >> 7; h[4] = ((u32)t & 0x7f) << 1 | 1;
 }
 
+/* Subtitle Shift (Setup / hold the Subtitle key). The subtitle decoder only keeps the setting (SPS_SHDN / SPS_SHUP,
+ * lines down / up on the 1080-line plane) and moves its own VobSub and text planes; the PG decoder is started with a
+ * fixed offset of 0 and draws where the disc says (Oppo gap: transport streams have no Subtitle Shift at all). Here
+ * every window and object position of a display set is moved instead. The amount is fixed per epoch (windows must
+ * not move inside one) and limited so that every window stays inside the picture, as the setting does elsewhere.
+ * apply = 0: returns dy limited by the set's windows; 1: moves the set. */
+#define SPS_SHDN     0x9cdc
+#define SPS_SHUP     0x9ce4
+CAVE4 static int pg_dy(u8 *d, u32 total, int H, int dy, u32 apply) {
+    u32 o, l;
+    for (o = 0; o + 3 <= total && (l = 3 + (d[o + 1] << 8 | d[o + 2])) <= total - o; o += l) {
+        u8 *p = d + o, *e = p + l; u32 win = *p == 0x17, k;
+        if (win && l > 3) { k = p[3]; p += 4; }                     /* WDS: id, x, y, w, h */
+        else if (*p == 0x16 && l >= 14) { k = p[13]; p += 14; }      /* PCS: object id, window id, flags, x, y [, crop] */
+        else continue;
+        for (; k; k--) {
+            u32 sz = win ? 9 : 8;
+            if (p + sz > e) break;
+            u8 *yp = p + (win ? 3 : 6); int y = yp[0] << 8 | yp[1];
+            if (!apply) {
+                if (win) { int r = H - (p[7] << 8 | p[8]) - y; if (dy > r) dy = r; if (dy < -y) dy = -y; }
+            } else if (y + dy >= 0 && y + dy < H) { y += dy; yp[0] = y >> 8; yp[1] = y; }
+            if (!win && (p[3] & 0x80)) sz = 16;
+            p += sz;
+        }
+    }
+    return dy;
+}
+
 CAVE4 void pg_feed(void **esh, u32 base) {
     cons_t consume = (cons_t)(base + VA_TSCONSUME);
     struct frag *f = esh[0], *g; u32 total = 0, n = 0, o, l;
@@ -240,8 +271,16 @@ CAVE4 void pg_feed(void **esh, u32 base) {
      * between was lost. Half of all seeks land on such a set (the "clear" after a line). Give the decoder an empty
      * epoch start instead: it clears the screen, which is all such a set can do without the sets before it. */
     if (n && d[0] == 0x16 && (d[1] << 8 | d[2]) >= 11) {
-        if (d[10] & 0xc0) ST(base)->pgsync = 1;
-        else if (!ST(base)->pgsync) { d[10] = 0x80; d[11] = 0; d[13] = 0; }
+        volatile struct st *s = ST(base);
+        u32 first = !s->pgsync; int H = d[5] << 8 | d[6], dy = s->pgdy;
+        if (d[10] & 0xc0) s->pgsync = 1;
+        else if (first) { d[10] = 0x80; d[11] = 0; d[13] = 0; }
+        if (s->sps && ((d[10] & 0x80) || first)) {            /* a new epoch, or the first set the decoder takes */
+            dy = *(int *)(s->sps + SPS_SHDN) - *(int *)(s->sps + SPS_SHUP);
+            if (H != 1080) dy = dy * H >> 10;
+            s->pgdy = dy = pg_dy(d, total, H, dy, 0);
+        }
+        if (dy) pg_dy(d, total, H, dy, 1);
     }
     struct pgpk *k = n ? ((alloc_t)(base + VA_ALLOC))(n * sizeof *k) : 0;
     if (!k) { ((free_t)(base + VA_FREE))(b); goto raw; }
@@ -428,6 +467,15 @@ void mp4_lang(u8 *x, u32 base) {
     for (u32 i = 0; i < ns && i < SLOTS; i++) send_lang(obj, s, 5, i + 1, p + P_SPREC + i * REC_SIZE, base);
 }
 
+/* PTS of the next subtitle AU already queued (the demuxer reads ahead) if it lies between st and lim, else 0.
+ * 90 kHz in 32 bits: good for 13 hours. */
+CAVE3 static u32 nx_au(u8 *d, u32 st, u32 lim) {
+    volatile u32 *q = (volatile u32 *)(d + SPS_AUQ); u32 h = q[0];
+    if (!q[2] || h >= 0x80) return 0;
+    q += 4 + h * (0x60 / 4) + 4;                           /* AU h: PTS at +0x10 */
+    return !q[1] && q[0] > st && q[0] < lim ? q[0] : 0;
+}
+
 /* After mrSpsDecStringByFmtSRT (text = the sample as is): a tx3g sample is a 2-byte big-endian text
  * length, the UTF-8 text, then optional style boxes. MKV/SRT text never starts with a byte < 8. */
 void mp4_srt(u8 *d, u32 base) {
@@ -441,13 +489,19 @@ void mp4_srt(u8 *d, u32 base) {
     *(u8 **)(d + SPS_TXT) = t + 2; *(u32 *)(d + SPS_LEN) = l;
     /* The MP4 demuxer gives text AUs no end time (-1), which the display shows only for a moment, and a line
      * shown with an end time holds the screen until then. A tx3g line ends where the track's next sample
-     * starts: take that from the next AU already queued (the demuxer reads ahead), else allow 3 s. */
-    volatile u32 *q = (volatile u32 *)(d + SPS_AUQ);
-    u64 st = *(u64 *)(d + SPS_STARTPTS), en = st + 3 * 90000;
-    u32 h = q[0], c = q[2];
-    if (c && h < 0x80) {
-        u64 nx = *(volatile u64 *)(d + SPS_AUQ + 0x10 + h * 0x60 + 0x10);
-        if (nx > st && nx < st + 30 * 90000) { en = nx; s->hits[7]++; }
-    }
+     * starts: take that from the next AU if it is queued already, else allow 3 s for now (tx_end). */
+    u32 st = *(u32 *)(d + SPS_STARTPTS), en = nx_au(d, st, st + 30 * 90000);
+    s->prov = 0;
+    if (en) s->hits[7]++; else s->prov = en = st + 3 * 90000;
     *(u64 *)(d + SPS_ENDPTS) = en;
+}
+
+/* Every round of the subtitle decoder's thread (p_need): the next sample of a tx3g line that got the 3 s allowance
+ * has arrived: the line ends there. Before, a line shorter than 3 s whose end was not read yet stayed too long. */
+CAVE3 void tx_end(u8 *d, u32 base) {
+    volatile struct st *s = ST(base); u32 pv = s->prov, nx;
+    if (!pv) return;
+    volatile u32 *e = (volatile u32 *)(d + SPS_ENDPTS);
+    if (e[0] != pv || e[1]) s->prov = 0;                   /* another AU by now */
+    else if ((nx = nx_au(d, *(u32 *)(d + SPS_STARTPTS), pv))) { e[0] = nx; s->prov = 0; }
 }
