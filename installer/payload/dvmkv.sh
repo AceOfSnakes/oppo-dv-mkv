@@ -5,12 +5,22 @@ export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin
 D=${OPPODV_D:-/mnt/ubi_boot/oppo-dv-mkv}
 log(){ echo "[$(cut -d' ' -f1 /proc/uptime)] $*"; }
 n=0; while :; do
-  P=$(ps | awk '$4 ~ /(^|\/)bdpprog\.1$/{print $1; exit}')
-  [ -n "$P" ] && grep -q liblp.so /proc/$P/maps 2>/dev/null && break
+  P=$(ps 2>/dev/null | awk '$4 ~ /(^|\/)bdpprog\.1$/{print $1; exit}')
+  [ -n "$P" ] && break
   n=$((n+1)); [ $n -gt 120 ] && { log "player not found"; exit 1; }; sleep 1
 done
 log "player pid $P"
+# video options at once (they patch the program itself, no library needed): the player picks its first HDMI output
+# (home menu refresh) a few seconds after it starts and keeps it until something is played
+[ -f $D/vidopt.sh ] && sh $D/vidopt.sh apply $D/options.txt 2>&1 | while read l; do log "video: $l"; done   # 25p/30p, menu refresh, default language
+n=0; until grep -q liblp.so /proc/$P/maps 2>/dev/null; do
+  n=$((n+1)); [ $n -gt 120 ] && { log "player not ready"; exit 1; }; sleep 1
+done
+log "player ready"
 [ -f $D/dvhook.sh ] && sh $D/dvhook.sh on 2>&1 | while read l; do log "dvhook: $l"; done   # MKV Dolby Vision signalling (liblp)
+# native_25p, the liblp half: tell the player which MKV/MP4 videos are progressive (it takes HD 25/30 fps for interlaced)
+[ -f $D/dvhook.sh ] && [ -f $D/vidopt.sh ] && [ "$(sh $D/vidopt.sh get native_25p $D/options.txt)" = on ] \
+  && sh $D/dvhook.sh scan on 2>&1 | grep -v '^sites=' | while read l; do log "video: $l"; done
 [ -f $D/p7kel.sh ] && sh $D/p7kel.sh on 2>&1 | while read l; do log "p7kel: $l"; done     # profile 7 decoder fixes (kernel)
 [ -f $D/bgfix.sh ] && sh $D/bgfix.sh on 2>&1 | while read l; do log "bgfix: $l"; done     # black letterbox bars in Dolby Vision (kernel)
 [ -f $D/sarfix.sh ] && sh $D/sarfix.sh on 2>&1 | while read l; do log "sarfix: $l"; done  # non-square pixels stretched to ~16:9 (kernel)

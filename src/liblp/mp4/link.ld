@@ -25,6 +25,8 @@ mrSpsDecGetState = 0x579d0c;
 rSpsTsData = 0x757c60;          /* PG timer of the subtitle decoder: +0x18 id, +0x20 when (u64), +0x28 pending */
 mrSpsThreadTriggerEvtSetEx = 0x577054;  /* (runtime VA; Ghidra shows +0x10000) */
 SECTIONS {
+  . = 0x530490;            /* vMPCTestDvdRwdThr, 0x958 bytes: progressive/interlaced from the H.264 / HEVC headers */
+  .cave5 : { *(.text.cave5) }
   . = 0x530de8;            /* vMPCTestDvdRwdSpeedThr, 0x9e4 bytes: moov pre-scan */
   .cave3 : { *(.text.cave3) }
   . = 0x53f4c4;            /* vMPCTestOperation1, 0x7fc bytes: subtitle fixes (MKV VobSub palette, MP4 VobSub size) */

@@ -20,7 +20,12 @@ struct st {
     u8 mmed[0x1c];   /* MPC_DOVI_INFO_T handed to mrSetMediaInfo */
     u32 hits;        /* debug counters */
     u8 hvcc;         /* 1 = splitter fix on (hvccfix.sh): DV also for a 23-byte hvcC (no VPS/SPS/PPS) */
+    u8 prog;         /* 1 = the video track parsed last is progressive (its H.264 SPS / HEVC flags; mp4.c mkv_avc/mkv_hevc) */
+    u8 scanon;       /* 1 = tell the player (dvhook.sh scan on; the native_25p option) */
+    u8 vprog;        /* prog of the file being started (dv_decide) */
+    u32 progp;       /* parser that set prog */
 };
+_Static_assert(__builtin_offsetof(struct st, prog) == 0x41 && __builtin_offsetof(struct st, progp) == 0x44, "mp4.c DV_PROG");
 #define ST(base) ((volatile struct st *)((base) + ST_VA))
 
 typedef u64 (*getlen_t)(void *, u8 *);
@@ -38,7 +43,7 @@ static u32 rd_vint(const u8 *b, u32 n, u32 *i, int keep_marker) {
 }
 
 /* H0: start of Tracks parsing -> forget any previous record */
-void dv_clear(u32 base) { ST(base)->have = 0; }
+void dv_clear(u32 base) { ST(base)->have = 0; ST(base)->prog = 0; }
 
 /* H1: TrackEntry child about to be skipped; peek into BlockAdditionMapping (0x41E4) */
 void dv_peek(u8 *p, u32 base) {
@@ -73,6 +78,7 @@ u32 dv_decide(u8 *proxy, u32 base) {
     u8 *p = *(u8 **)(proxy + 0x114);
     s->active = 0;
     s->hits++;
+    s->vprog = s->scanon && s->progp == (u32)p ? s->prog : 0;
     if (!s->have || s->parser != (u32)p) return 0;
     u8 prof = s->rec[2] >> 1, lvl = ((s->rec[2] & 1) << 5) | (s->rec[3] >> 3);
     u8 rpu = (s->rec[3] >> 2) & 1, el = (s->rec[3] >> 1) & 1, bl = s->rec[3] & 1;
@@ -89,10 +95,14 @@ u32 dv_decide(u8 *proxy, u32 base) {
     return base + ST_VA + __builtin_offsetof(struct st, mmed);
 }
 
-/* H3: mrMkvSetVideoStreamInf -> mrSetStreamInfo; vidinfo DV fields */
+/* H3: mrMkvSetVideoStreamInf -> mrSetStreamInfo; vidinfo DV fields.
+ * Scan type (+0x2c: 0 unknown, 1 progressive, 2 interlaced): the parser never sets it, and the player program then
+ * takes HD video at 25/29.97/30 frames/s for interlaced and plays it at 50/60 Hz. HD only: SD keeps the stock way. */
 void dv_vinfo(u8 *v, u32 base) {
     volatile struct st *s = ST(base);
-    if (!s->active || !v) return;
+    if (!v) return;
+    if (s->vprog && *(u32 *)(v + 0x18) >= 720) *(u32 *)(v + 0x2c) = 1;
+    if (!s->active) return;
     v[0x124] = 1; v[0x125] = 1; v[0x126] = 0; v[0x127] = 1; v[0x128] = s->rec[23]; v[0x129] = 1;
     v[0x12c] = s->profile; v[0x12d] = s->level;
 }

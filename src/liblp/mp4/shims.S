@@ -293,3 +293,28 @@ p_need:
     movne r0, #0
     pop {r4, r5, r6, pc}
     .ltorg
+
+    .section .text.cave5,"ax"
+@ MKV, CLpMkvParser::mrParseTrackEntry: the video track's CodecPrivate is in memory (sl, length at [sp, #0x20];
+@ r6 = parser) where the parser takes the profile and level from an avcC (0x3c0468) or hvcC (0x3c04c4). Both sites
+@ were "mov r3, #1". mkv_avc / mkv_hevc note whether the video is progressive (see mp4.c).
+k_avc:
+    push {r0-r3, r12, lr}
+    GETBASE
+    mov r3, r1
+    mov r0, sl
+    ldr r1, [sp, #(24 + 0x20)]
+    mov r2, r6
+    bl mkv_avc                 @ (CodecPrivate, length, parser, base)
+    b 1f
+k_hevc:
+    push {r0-r3, r12, lr}
+    GETBASE
+    mov r3, r1
+    mov r0, sl
+    ldr r1, [sp, #(24 + 0x20)]
+    mov r2, r6
+    bl mkv_hevc                @ (CodecPrivate, length, parser, base)
+1:  pop {r0-r3, r12, lr}
+    mov r3, #1
+    bx lr

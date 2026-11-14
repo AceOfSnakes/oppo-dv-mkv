@@ -4,7 +4,8 @@
 #   mp4/build/mp4.bin   MP4 audio/subtitle languages + tx3g subtitles, over vMPCTestOperation4 (MPC self-test code)
 #   mp4/build/mp4b.bin  MP4 moov pre-scan (language list), over vMPCTestDvdRwdSpeedThr (MPC self-test code)
 #   mp4/build/mp4c.bin  subtitle fixes: MKV VobSub palette on a switch, MP4 VobSub frame size, over vMPCTestOperation1
-# dvhook.sh on|off|status|hvcc on|off. Checks liblp's md5 and every site's original contents, and verifies the written blobs.
+#   mp4/build/mp4d.bin  progressive/interlaced from the H.264 / HEVC headers (MKV, MP4), over vMPCTestDvdRwdThr
+# dvhook.sh on|off|status|hvcc on|off|scan on|off|langs CODE... Checks liblp's md5 and every site's original contents, and verifies the written blobs.
 import os, struct, subprocess
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 def load(stem):
@@ -17,21 +18,25 @@ blob, syms = load('build/dvhook')
 blob2, syms2 = load('mp4/build/mp4')
 blob3 = open('mp4/build/mp4b.bin', 'rb').read()   # moov pre-scan (same ELF, section .cave3)
 blob4 = open('mp4/build/mp4c.bin', 'rb').read()   # subtitle fixes (same ELF, section .cave4)
+blob5 = open('mp4/build/mp4d.bin', 'rb').read()   # progressive/interlaced (same ELF, section .cave5)
 def bl(src, dst, op=0xeb000000):
     off = (dst - (src + 8)) >> 2
     assert -(1 << 23) <= off < (1 << 23)
     return struct.pack('<I', op | (off & 0xffffff))
 B_AL = 0xea000000
-CAVE, ST, STLEN = 0x6cdc00, 0x757e00, 0x44
+CAVE, ST, STLEN = 0x6cdc00, 0x757e00, 0x48
 HVCC = 0x40   # struct st .hvcc
+SCANON = 0x42 # struct st .scanon
 CAVE2, CAVE2_LEN = 0x5402fc, 0xae8                       # vMPCTestOperation4
 CAVE2_ORIG = 'f04f2de914d04de2cc899fe5cc399fe5'          # its first 16 bytes in liblp e39b358c
 CAVE3, CAVE3_LEN = 0x530de8, 0x9e4                       # vMPCTestDvdRwdSpeedThr
 CAVE3_ORIG = 'f04f2de914d04de2fc789fe5fc389fe5'          # its first 16 bytes in liblp e39b358c
 CAVE4, CAVE4_LEN = 0x53f4c4, 0x7fc                       # vMPCTestOperation1
 CAVE4_ORIG = 'ff472de94c879fe54c379fe508808fe0'          # its first 16 bytes in liblp e39b358c
+CAVE5, CAVE5_LEN = 0x530490, 0x958                       # vMPCTestDvdRwdThr
+CAVE5_ORIG = 'f04f2de971df4de240b08de27c889fe5'          # its first 16 bytes in liblp e39b358c
 ST2, ST2LEN = 0x757e80, 0x134                            # mp4.c struct st
-assert len(blob) <= 0x400 and len(blob2) <= CAVE2_LEN and len(blob3) <= CAVE3_LEN and len(blob4) <= CAVE4_LEN and ST + STLEN <= ST2 and ST2 + ST2LEN <= 0x758000
+assert len(blob) <= 0x400 and len(blob2) <= CAVE2_LEN and len(blob3) <= CAVE3_LEN and len(blob4) <= CAVE4_LEN and len(blob5) <= CAVE5_LEN and ST + STLEN <= ST2 and ST2 + ST2LEN <= 0x758000
 hx = lambda b: ''.join('\\x%02x' % c for c in b)
 
 # code sites: (VA, original 4 bytes, new 4 bytes)
@@ -74,6 +79,11 @@ code.append((0x573908, bl(0x573908, 0x14b4d0), bl(0x573908, syms2['p_start']))) 
 code.append((0x58ab0c, bl(0x58ab0c, 0x1563c0), bl(0x58ab0c, syms2['p_tset'])))               # bl vSpsDbgMsg
 code.append((0x58b018, struct.pack('<I', 0xe5c40028), struct.pack('<I', 0xe1a00000)))        # strb r0, [r4, #0x28] -> nop
 code.append((0x57aee8, bl(0x57aee8, 0x169a4c), bl(0x57aee8, syms2['p_need'])))               # bl fgSpsDecStateNeedTrigger
+# Progressive or interlaced (Oppo gap: neither the MKV nor the MP4 parser says, and the player program takes HD video at
+# 25/29.97/30 frames/s for interlaced): read it where CLpMkvParser::mrParseTrackEntry holds the video track's avcC / hvcC
+# (k_avc, k_hevc); the MP4 side rides on the moov pre-scan and the mrGetStreamInfo hook. Passed on only with "scan on".
+code.append((0x3c0468, struct.pack('<I', 0xe3a03001), bl(0x3c0468, syms2['k_avc'])))         # mov r3, #1 -> bl
+code.append((0x3c04c4, struct.pack('<I', 0xe3a03001), bl(0x3c04c4, syms2['k_hevc'])))        # mov r3, #1 -> bl
 # data sites, absolute addresses (runtime base + VA): (word VA, accepted original VAs, new VA)
 data = [(0x6ee3a4, [0x402628], syms2['m_moov']),             # MP4 box dispatch table: moov handler
         (0x6ee2a0, [0x402920], syms2['m_mdhd']),             # MP4 box dispatch table: mdhd handler
@@ -95,7 +105,9 @@ out = f'''#!/bin/sh
 # oppo-dv-mkv: Dolby Vision from MKV (P5/P8 single layer, P7 BL+EL single track; dvcC/dvvC-detected) and from MP4
 # with a dvvC box (profile 8); MP4 audio/subtitle languages and tx3g text subtitles; MKV VobSub palette fixes -
 # RAM patch for liblp.so.
-# usage: on|off|status|langs CODE...|hvcc on|off  (langs: MP4 audio/subtitle language list; hvcc: DV also for MKVs whose hvcC has no VPS/SPS/PPS; only once hvccfix.sh is on)
+# usage: on|off|status|langs CODE...|hvcc on|off|scan on|off  (langs: MP4 audio/subtitle language list; hvcc: DV also for
+# MKVs whose hvcC has no VPS/SPS/PPS, only once hvccfix.sh is on; scan: tell the player which MKV/MP4 videos are
+# progressive, so HD 25/29.97/30 frames/s is not taken for interlaced - the native_25p option)
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin
 LIB_MD5=e39b358c5b0948933f49fd3099f81114
 [ "$(md5sum /usr/local/lib/liblp.so | cut -d' ' -f1)" = $LIB_MD5 ] || {{ echo "liblp md5 mismatch"; exit 1; }}
@@ -133,6 +145,7 @@ on)
   c=$(rd $((B + {CAVE2:#x})) 16); [ "$c" = {CAVE2_ORIG} ] || [ "$c" = {blob2[:16].hex()} ] || {{ echo "unexpected code at {CAVE2:#x}: $c"; exit 1; }}
   c=$(rd $((B + {CAVE3:#x})) 16); [ "$c" = {CAVE3_ORIG} ] || [ "$c" = {blob3[:16].hex()} ] || {{ echo "unexpected code at {CAVE3:#x}: $c"; exit 1; }}
   c=$(rd $((B + {CAVE4:#x})) 16); [ "$c" = {CAVE4_ORIG} ] || [ "$c" = {blob4[:16].hex()} ] || {{ echo "unexpected code at {CAVE4:#x}: $c"; exit 1; }}
+  c=$(rd $((B + {CAVE5:#x})) 16); [ "$c" = {CAVE5_ORIG} ] || [ "$c" = {blob5[:16].hex()} ] || {{ echo "unexpected code at {CAVE5:#x}: $c"; exit 1; }}
   restore
   printf '{hx(blob)}' | dd of=$M bs=1 seek=$((B + {CAVE:#x})) conv=notrunc 2>/dev/null
   [ "$(rd $((B + {CAVE:#x})) {len(blob)})" = "{blob.hex()}" ] || {{ echo "blob verify failed"; exit 1; }}
@@ -142,6 +155,8 @@ on)
   [ "$(rd $((B + {CAVE3:#x})) {len(blob3)})" = "{blob3.hex()}" ] || {{ echo "blob verify failed (mp4 pre-scan)"; exit 1; }}
   printf '{hx(blob4)}' | dd of=$M bs=1 seek=$((B + {CAVE4:#x})) conv=notrunc 2>/dev/null
   [ "$(rd $((B + {CAVE4:#x})) {len(blob4)})" = "{blob4.hex()}" ] || {{ echo "blob verify failed (subtitles)"; exit 1; }}
+  printf '{hx(blob5)}' | dd of=$M bs=1 seek=$((B + {CAVE5:#x})) conv=notrunc 2>/dev/null
+  [ "$(rd $((B + {CAVE5:#x})) {len(blob5)})" = "{blob5.hex()}" ] || {{ echo "blob verify failed (scan type)"; exit 1; }}
   dd if=/dev/zero of=$M bs=1 seek=$((B + {ST:#x})) count={STLEN} conv=notrunc 2>/dev/null
   dd if=/dev/zero of=$M bs=1 seek=$((B + {ST2:#x})) count={ST2LEN} conv=notrunc 2>/dev/null
   for e in $DSITES; do a=$((B + ${{e%%:*}})); wv $a $((B + ${{e##*:}})); done
@@ -153,6 +168,11 @@ hvcc)
   case "$2" in on) v='\\x01';; off) v='\\x00';; *) echo "usage: hvcc on|off"; exit 1;; esac
   printf "$v" | dd of=$M bs=1 seek=$((B + {ST + HVCC:#x})) conv=notrunc 2>/dev/null
   echo "empty hvcC (no VPS/SPS/PPS): DV $([ "$(rd $((B + {ST + HVCC:#x})) 1)" = 01 ] && echo allowed || echo refused)";;
+scan)
+  [ "$(state)" = ok ] || {{ echo "dvhook is not on"; exit 1; }}
+  case "$2" in on) v='\\x01';; off) v='\\x00';; *) echo "usage: scan on|off"; exit 1;; esac
+  printf "$v" | dd of=$M bs=1 seek=$((B + {ST + SCANON:#x})) conv=notrunc 2>/dev/null
+  echo "progressive video: $([ "$(rd $((B + {ST + SCANON:#x})) 1)" = 01 ] && echo "told to the player" || echo "not told (stock)")";;
 langs)   # MP4 language list: up to 8 codes (2 or 3 letters); none = clear
   [ "$(state)" = ok ] || {{ echo "dvhook is not on"; exit 1; }}
   shift; v=; k=0

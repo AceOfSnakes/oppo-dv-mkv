@@ -16,6 +16,10 @@ Since v2.0.0: with Output Resolution = Source Direct the player leaves Dolby Vis
 Since v2.0.0 (beta): in TV-led Dolby Vision the TV gets the film's metadata as authored: CM 2.9 (L1 above the
 mastering level, positive lift, the active area L5) and CM 4.0 (L3, L8, L9, L11, L254), which the player lost on
 the way; subtitles and menus in the black bars stay visible (player bugs, for every Dolby Vision source).
+Since v2.0.2 (beta): video options (all off unless you turn them on): edit oppo-dv-mkv-options.txt next to the AutoScript folder before
+installing. native_25p = on: HD MKV/MP4 files at 25 or 30 frames/s play at 25 / 30 Hz instead of 50 / 60 Hz
+(interlaced 1080i files are recognised and play as before). menu_refresh = 60: home menu at 60 Hz on RU, EU and AU
+firmware. default_language = en: the language a factory reset sets. See "Video options" in the README on GitHub.
 
 Also: better subtitles (anti-aliased, thicker outline with black, grey colours for HDR/DV) and a factory menu
 shortcut (Setup > Playback Setup, cursor on Gapless Playback, press 0 0 0 0), for the player programs of every
