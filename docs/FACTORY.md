@@ -21,7 +21,6 @@ remote has. With the factory menu shortcut installed, the normal remote opens it
 | :----------:   | :------: | :---------:  |
 | ![Facttory EN](./images/factory-en.png) | ![Factory DE](./images/factory-de.png) | ![Factory RU](./images/factory-ru.png)
 
-
 The page shows the firmware version, sub version and loader version, the DVD and Blu-ray region codes, and some
 service buttons. Close it with Return.
 
