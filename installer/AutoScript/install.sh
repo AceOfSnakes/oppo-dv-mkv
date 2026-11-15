@@ -8,9 +8,10 @@
 #   /mnt/ubi_boot/bdpprog               boot wrapper (run by the jailbreak launcher instead of bdpprog.1)
 #   /mnt/ubi_boot/bdpprog.prev          the jb_overlay boot script, if that mod was installed (the wrapper chains to it)
 #   /mnt/ubi_boot/oppo-dv-mkv/          dvmkv.sh + the installed parts: dvhook.sh, p7kel.sh, bgfix.sh, sarfix.sh, arflag.sh, dvexit.sh, dvcm.sh, hvccfix.sh,
-#                                       ftrfix.sh, mp4elfix.sh, alacdec.bin, bdpaudec.db (Dolby Vision MKV fix), subs.sh, image_bdp83.bin
-#                                       (subtitles), fpage.sh (factory menu), languages.txt (MP4 language list, from
-#                                       oppo-dv-mkv-languages.txt on the stick). RAM patches applied at every boot.
+#                                       ftrfix.sh, mp4elfix.sh, alacdec.bin, bdpaudec.db, vidopt.sh (Dolby Vision MKV fix), subs.sh,
+#                                       image_bdp83.bin (subtitles), fpage.sh (factory menu), languages.txt (MP4 language list, from
+#                                       oppo-dv-mkv-languages.txt on the stick), options.txt (video options, from
+#                                       oppo-dv-mkv-options.txt on the stick). RAM patches applied at every boot.
 # Nothing in the firmware itself is modified. Log: oppo-dv-mkv.log in the root of the USB stick.
 VERSION=@VERSION@
 S=${OPPODV_SRC:-/mnt/sda1/AutoScript}                 # this folder on the stick
@@ -71,6 +72,7 @@ XCHECK=${OPPODV_XCHECK:-sh $S/oppo-dv-mkv/dvexit.sh check}  # Dolby Vision left 
 CCHECK=${OPPODV_CCHECK:-sh $S/oppo-dv-mkv/dvcm.sh check}    # TV-led Dolby Vision metadata, CM 2.9 / CM 4.0 (DV part; idem)
 TCHECK=${OPPODV_TCHECK:-sh $S/oppo-dv-mkv/ftrfix.sh check}  # hang at the next file after an MP4 with audio was stopped (DV part; idem)
 ECHECK=${OPPODV_ECHECK:-sh $S/oppo-dv-mkv/mp4elfix.sh check} # profile 7 MP4s that stop after a second (DV part; idem)
+VCHECK=${OPPODV_VCHECK:-sh $S/oppo-dv-mkv/vidopt.sh check}  # video options: 25p/30p, menu refresh, default language (DV part; player program, own layouts)
 SCHECK=${OPPODV_SCHECK:-sh $S/oppo-dv-mkv/subs.sh check}
 MCHECK=${OPPODV_MCHECK:-sh $S/oppo-dv-mkv/fpage.sh check}
 RUN=$(running)
@@ -112,6 +114,7 @@ if [ -e $S/CHECKONLY ]; then
   [ -f $S/oppo-dv-mkv/ftrfix.sh ] && echo "MP4 stop:  $($TCHECK 2>&1 | tr '\n' ' ')"
   [ -f $S/oppo-dv-mkv/mp4elfix.sh ] && echo "MP4 P7:    $($ECHECK 2>&1 | tr '\n' ' ')"
   [ -f $S/oppo-dv-mkv/alacdec.bin ] && echo "audio db:  $(m5 $DBORIG)  (ALAC decoder swap needs 0abee82b1ea7bc77d3db30907355376b)"
+  [ -f $S/oppo-dv-mkv/vidopt.sh ] && echo "video options: $($VCHECK 2>&1 | tr '\n' ' ')"
   echo "bdpprog.1: $(m5 $PLAYER)  (region player program, informative)"
   echo "running:   $RUN  (player program in use)"
   echo "subtitles: $(echo $SCK)"
@@ -168,7 +171,8 @@ echo "firmware: bdpprog.1 md5 $(m5 $PLAYER), running player program ${RUN:-unkno
   && echo "TV-led Dolby Vision metadata (CM 2.9 / CM 4.0): $($CCHECK 2>&1)" \
   && echo "MKVs without VPS/SPS/PPS in the hvcC: $($HCHECK 2>&1)" \
   && echo "next file after a stopped MP4 with audio: $($TCHECK 2>&1)" \
-  && echo "profile 7 MP4s that stop after a second: $($ECHECK 2>&1)"
+  && echo "profile 7 MP4s that stop after a second: $($ECHECK 2>&1)" \
+  && echo "video options: $($VCHECK 2>&1 | tr '\n' ' ')"
 [ -n "$SUBS" ] && [ -z "$SUBS_WHY" ] && echo "subtitles: $(echo $SCK)"
 [ -n "$MENU" ] && [ -z "$MENU_WHY" ] && echo "factory menu: $(echo $MCK)"
 for p in DV SUBS MENU; do
@@ -185,7 +189,7 @@ if [ -z "$DV$SUBS$MENU" ] && [ -n "$MENU_NN" ] && [ -z "$IN_DV$IN_SUBS" ]; then
   HEAD="NOTHING TO INSTALL - this player does not need it. Nothing was changed."; result; exit 0
 fi
 [ -n "$DV$SUBS$MENU" ] || fail "none of the parts in this zip can be installed safely on this player"
-FILES="dvmkv.sh${DV:+ dvhook.sh p7kel.sh bgfix.sh sarfix.sh arflag.sh dvexit.sh dvcm.sh hvccfix.sh ftrfix.sh mp4elfix.sh alacdec.bin}${SUBS:+ subs.sh}${MENU:+ fpage.sh}"
+FILES="dvmkv.sh${DV:+ dvhook.sh p7kel.sh bgfix.sh sarfix.sh arflag.sh dvexit.sh dvcm.sh hvccfix.sh ftrfix.sh mp4elfix.sh alacdec.bin vidopt.sh}${SUBS:+ subs.sh}${MENU:+ fpage.sh}"
 for f in $FILES bdpprog ${SUBS:+$(for q in $SQUARES; do echo sq$q.png; done)}; do
   [ -f $S/oppo-dv-mkv/$f ] || fail "missing $f on the stick (unzip the whole release)"
   grep -q " $f\$" $S/oppo-dv-mkv/MD5SUMS && [ "$(m5 $S/oppo-dv-mkv/$f)" = "$(grep " $f\$" $S/oppo-dv-mkv/MD5SUMS | cut -d' ' -f1)" ] \
@@ -198,7 +202,7 @@ put(){  # atomic copy: $1 source, $2 destination
   echo "  $2 installed"
 }
 for f in $FILES; do put $S/oppo-dv-mkv/$f $D/$f || fail "writing $D/$f"; done
-[ -z "$DV" ] && [ -e $D/p7kel.sh ] && rm -f $D/dvhook.sh $D/p7kel.sh $D/bgfix.sh $D/sarfix.sh $D/arflag.sh $D/dvexit.sh $D/dvcm.sh $D/hvccfix.sh $D/ftrfix.sh $D/mp4elfix.sh $D/alacdec.bin $D/bdpaudec.db && echo "  Dolby Vision MKV fix not installed now: older copy removed"
+[ -z "$DV" ] && [ -e $D/p7kel.sh ] && rm -f $D/dvhook.sh $D/p7kel.sh $D/bgfix.sh $D/sarfix.sh $D/arflag.sh $D/dvexit.sh $D/dvcm.sh $D/hvccfix.sh $D/ftrfix.sh $D/mp4elfix.sh $D/alacdec.bin $D/bdpaudec.db $D/vidopt.sh $D/options.txt && echo "  Dolby Vision MKV fix not installed now: older copy removed"
 if [ -n "$DV" ]; then
   # audio DSP decoders: the player's own file, with the ALAC decoder of firmware 56/60 appended and its entry (index 28,
   # offset field at byte 1276) pointed at it. 65's ALAC decoder is too slow for some 192 kHz files (crackling).
@@ -216,6 +220,11 @@ if [ -n "$DV" ]; then   # MP4 audio/subtitle language list: oppo-dv-mkv-language
   if [ -f $LS ]; then put $LS $D/languages.txt || fail "writing $D/languages.txt"
     l=$(echo $(tr -d '\r' < $LS | grep -v '^[[:space:]]*#' | awk 'NF{print $1}')); echo "  MP4 language list: ${l:-none (the player keeps the first 8 tracks)}"
   elif [ -f $D/languages.txt ]; then echo "  $D/languages.txt kept (no oppo-dv-mkv-languages.txt on the stick)"; fi
+  OS=${S%/*}/oppo-dv-mkv-options.txt   # video options: 25p/30p, menu refresh, default language (vidopt.sh, at every boot)
+  if [ -f $OS ]; then put $OS $D/options.txt || fail "writing $D/options.txt"
+    v(){ x=$(tr -d '\r' < $OS | grep -v '^[[:space:]]*#' | sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\([A-Za-z0-9]*\).*/\1/p" | sed -n '$p' | tr A-Z a-z); echo ${x:-stock}; }
+    echo "  video options: native_25p $(v native_25p), menu_refresh $(v menu_refresh), default_language $(v default_language)"
+  elif [ -f $D/options.txt ]; then echo "  $D/options.txt kept (no oppo-dv-mkv-options.txt on the stick)"; fi
 fi
 [ -z "$MENU" ] && [ -e $D/fpage.sh ] && rm -f $D/fpage.sh && echo "  factory menu shortcut not installed now: older copy removed"
 if [ -n "$SUBS" ]; then

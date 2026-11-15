@@ -18,6 +18,7 @@
 typedef unsigned char u8; typedef unsigned short u16; typedef unsigned int u32; typedef unsigned long long u64;
 #define CAVE3 __attribute__((section(".text.cave3"), noinline))   /* moov pre-scan: in vMPCTestDvdRwdSpeedThr (link.ld) */
 #define CAVE4 __attribute__((section(".text.cave4"), noinline))   /* subtitle fixes: in vMPCTestOperation1 (link.ld) */
+#define CAVE5 __attribute__((section(".text.cave5"), noinline))   /* progressive/interlaced: in vMPCTestDvdRwdThr (link.ld) */
 #include "iso639.h"
 
 #define ST_VA       0x757e80u   /* RW bss slack after dvhook's state (0x757e00..0x757e44) */
@@ -36,6 +37,8 @@ typedef unsigned char u8; typedef unsigned short u16; typedef unsigned int u32; 
                                    u32 start[32] (+0xc, 90 kHz); vMP4NEROCHAPHandle / u4GetNeroChapterNo */
 #define MAXCHAP     32
 #define P_VIDW      0xb6fc      /* parser: u16 video width (height at +2) */
+#define P_VIDSTRM   0x7400      /* parser: MPCVidElmStrmInf[], 0x140 each (+0x2c scan type: 0 unknown, 1 progressive, 2 interlaced) */
+#define DV_PROG     0x757e41u   /* dvhook.c's state: u8 prog, u8 scanon (+1), u32 progp (+3) */
 #define X_PARSER    0x40e8      /* MP4 proxy: CLpMp4Parser* */
 #define X_MSG       0xc         /* MP4 proxy: -> -> playback message object */
 #define X_NSPINT    0xad8       /* MP4 proxy: internal subtitle count */
@@ -64,11 +67,16 @@ struct st {
     u32 scan[4];     /* last pre-scan: reads, tracks, audio candidates << 16 | subtitle candidates, skipped */
     u8 tk_tid, nsd;  /* last tkhd's track_ID; VobSub frame sizes kept in sd[] */
     u16 tk_w, tk_h;  /* last tkhd's width and height (integer pixels) */
-    u8 pgmix, rsv;   /* the MKV being played has PGS and other subtitle formats (pg_mode; ST_PGMIX in shims.S) */
+    u8 pgmix;        /* the MKV being played has PGS and other subtitle formats (pg_mode; ST_PGMIX in shims.S) */
+    u8 pgsync;       /* the PG decoder has been given a display set it can start from (pg_feed; 0 again in p_start) */
     struct { u8 tid, rsv; u16 w, h, rsv2; } sd[SLOTS];   /* 'subp' (VobSub) tracks: frame size from their tkhd */
+    u32 sps;         /* the subtitle decoder whose PG decoder is running (p_start / p_tset; ST_SPS in shims.S) */
+    short pgdy;      /* lines the current PGS epoch is moved down (Subtitle Shift; pg_feed) */
+    u8 vprog;        /* the MP4's video is progressive (pre-scan: its avcC / hvcC; vid_trak) */
+    u32 prov;        /* end time given to the tx3g line on screen for want of a next sample (mp4_srt / tx_end); 0 = none */
 };
 #define ST(base) ((volatile struct st *)((base) + ST_VA))
-_Static_assert(__builtin_offsetof(struct st, pgmix) == 0xe6 && sizeof(struct st) == 0x128, "struct st layout (shims.S, mkinstall.py)");
+_Static_assert(__builtin_offsetof(struct st, pgmix) == 0xe6 && __builtin_offsetof(struct st, pgsync) == 0xe7 && __builtin_offsetof(struct st, sps) == 0x128 && __builtin_offsetof(struct st, pgdy) == 0x12c && __builtin_offsetof(struct st, prov) == 0x130 && sizeof(struct st) == 0x134, "struct st layout (shims.S, mkinstall.py)");
 
 struct langmsg { u32 type; u16 idx; u8 c[3]; };
 typedef void (*send_t)(void *obj, u32 msg, void *data);
@@ -181,6 +189,99 @@ static CAVE3 u32 pref_a2(volatile struct st *s, u32 i, u32 base) {   /* list ent
     return iso2((u32)(a - 0x60) << 10 | (u32)(b - 0x60) << 5 | (c - 0x60), base);
 }
 
+/* ---- progressive or interlaced? ----
+ * Neither parser tells the player (MPCVidElmStrmInf +0x2c stays 0 = unknown), and the player program then takes HD
+ * video at 25, 29.97 or 30 frames/s for interlaced and plays it at 50/60 Hz. The answer is in the codec headers the
+ * parsers already hold: H.264 SPS frame_mbs_only_flag, HEVC general_progressive/interlaced_source_flag. Only
+ * "progressive" is passed on; anything else (interlaced, other codecs, a header that does not parse) stays unknown. */
+struct bits { const u8 *b; u32 n, pos; };   /* n = length in bits; pos past n = ran out (reads give 0) */
+static CAVE5 u32 gb(struct bits *s, u32 k) {
+    u32 v = 0;
+    while (k--) { u32 p = s->pos++; v = v << 1 | (p < s->n ? (s->b[p >> 3] >> (7 - (p & 7))) & 1 : 0); }
+    return v;
+}
+static CAVE5 u32 ue(struct bits *s) {
+    u32 z = 0;
+    while (s->pos < s->n && !gb(s, 1)) z++;
+    return z > 31 ? 0 : (1u << z) - 1 + gb(s, z);
+}
+/* avcC (version, profile, compat, level, length size, SPS count, SPS length, SPS NAL): 1 = frame_mbs_only_flag set */
+static CAVE5 u32 avc_prog(const u8 *c, u32 len) {
+    u8 r[192]; u32 n = 0, i, k, z = 0;
+    if (len < 12 || c[0] != 1 || !(c[5] & 0x1f) || (c[8] & 0x1f) != 7) return 0;
+    k = (u32)c[6] << 8 | c[7];
+    if (k > len - 8) k = len - 8;
+    for (i = 1; i < k && n < sizeof r; i++) {            /* the NAL without its header byte and emulation prevention */
+        u8 x = c[8 + i];
+        if (z >= 2 && x == 3) { z = 0; continue; }
+        z = x ? 0 : z + 1; r[n++] = x;
+    }
+    struct bits s; s.b = r; s.n = n * 8; s.pos = 24;     /* profile_idc, constraint flags, level_idc */
+    u32 pr = r[0];
+    ue(&s);                                              /* seq_parameter_set_id */
+    if (pr == 100 || pr == 110 || pr == 122 || pr == 244 || pr == 44 || pr == 83 || pr == 86 || pr == 118 || pr == 128
+        || pr == 138 || pr == 139 || pr == 134 || pr == 135) {
+        u32 cf = ue(&s);
+        if (cf == 3) gb(&s, 1);
+        ue(&s); ue(&s); gb(&s, 1);                       /* bit depths, transform bypass */
+        if (gb(&s, 1))                                   /* scaling matrix */
+            for (i = 0; i < (cf != 3 ? 8u : 12u); i++)
+                if (gb(&s, 1)) {
+                    u32 last = 8, next = 8;
+                    for (k = 0; k < (i < 6 ? 16u : 64u); k++) {
+                        if (next) { u32 d = ue(&s); next = (last + (d & 1 ? (d + 1) >> 1 : 0u - (d >> 1))) & 255; }
+                        if (next) last = next;
+                    }
+                }
+    }
+    ue(&s);                                              /* log2_max_frame_num */
+    k = ue(&s);                                          /* pic_order_cnt_type */
+    if (k == 0) ue(&s);
+    else if (k == 1) { gb(&s, 1); ue(&s); ue(&s); k = ue(&s); if (k > 255) return 0; while (k--) ue(&s); }
+    ue(&s); gb(&s, 1); ue(&s); ue(&s);                   /* reference frames, gaps, width, height in macroblocks */
+    k = gb(&s, 1);                                       /* frame_mbs_only_flag */
+    return s.pos <= s.n ? k : 0;
+}
+/* hvcC: byte 6 = general_progressive_source_flag (0x80), general_interlaced_source_flag (0x40) */
+static CAVE5 u32 hevc_prog(const u8 *c, u32 len) { return len >= 23 && c[0] == 1 && (c[6] & 0xc0) == 0x80; }
+static CAVE5 void mkv_prog(u32 v, u32 parser, u32 base) {
+    volatile u8 *d = (volatile u8 *)(base + DV_PROG);
+    d[0] = v; *(volatile u32 *)(d + 3) = parser;
+}
+/* MKV: the video track's CodecPrivate while CLpMkvParser::mrParseTrackEntry holds it (k_avc / k_hevc in shims.S).
+ * dvhook.c forgets it when the next Tracks element is parsed and hands it to the player when the file starts. */
+CAVE5 void mkv_avc(const u8 *c, u32 len, u32 parser, u32 base) { mkv_prog(avc_prog(c, len), parser, base); }
+CAVE5 void mkv_hevc(const u8 *c, u32 len, u32 parser, u32 base) { mkv_prog(hevc_prog(c, len), parser, base); }
+/* MP4, a trak of the moov pre-scan: 1 = a video track whose sample entry has a progressive avcC / hvcC.
+ * stsd: box header 8, version/flags 4, count 4; the first entry: size 4, type 4, 78 bytes, then its boxes. */
+static CAVE5 u32 vid_trak(struct scan *c, u64 pos, u64 end) {
+    u8 b[0x1c0]; u64 a, e; u32 hl, n, i;
+    if (!(hl = child(c, pos, end, FCC('m','d','i','a'), &pos, &end))) return 0;
+    pos += hl;
+    if (!child(c, pos, end, FCC('h','d','l','r'), &a, &e) || e - a < 0x14 || rd(c, a, b, 0x14)) return 0;
+    if (be32(b + 0x10) != FCC('v','i','d','e')) return 0;
+    if (!(hl = child(c, pos, end, FCC('m','i','n','f'), &a, &e))) return 0;
+    if (!(hl = child(c, a + hl, e, FCC('s','t','b','l'), &a, &e))) return 0;
+    if (!child(c, a + hl, e, FCC('s','t','s','d'), &a, &e)) return 0;
+    n = e - a > sizeof b ? sizeof b : (u32)(e - a);
+    if (n < 0x66 + 8 || rd(c, a, b, n)) return 0;
+    for (i = 0x66; i + 8 <= n; ) {
+        u32 sz = be32(b + i), ty = be32(b + i + 4), m = n - i - 8;
+        if (sz < 8) break;
+        if (m > sz - 8) m = sz - 8;
+        if (ty == FCC('a','v','c','C')) return avc_prog(b + i + 8, m);
+        if (ty == FCC('h','v','c','C')) return hevc_prog(b + i + 8, m);
+        if (sz > n) break;
+        i += sz;
+    }
+    return 0;
+}
+static CAVE5 u32 scan_on(u32 base) { return ((volatile u8 *)(base + DV_PROG))[1]; }
+/* MP4, after CLpMp4Parser::mrGetStreamInfo (mp4_gsi): the video's scan type, HD only (SD keeps the stock way) */
+static CAVE5 void vid_gsi(u8 *p, volatile struct st *s, u32 base) {
+    if (scan_on(base)) *(u32 *)(p + P_VIDSTRM + 0x2c) = s->vprog && *(u16 *)(p + P_VIDW + 2) >= 720;
+}
+
 /* moov box (b = the parser's first bytes of it): a new file (or a re-parse) starts. Forget the previous one, and when
  * a language list is set, decide which audio/subtitle tracks the parser keeps. */
 /* tkhd box (b = its first 0x28 bytes): remember the track's width and height for the hdlr hook. They sit past the
@@ -221,6 +322,35 @@ static void pes_ts(u8 *h, u32 mark, u64 t) {
     h[3] = t >> 7; h[4] = ((u32)t & 0x7f) << 1 | 1;
 }
 
+/* Subtitle Shift (Setup / hold the Subtitle key). The subtitle decoder only keeps the setting (SPS_SHDN / SPS_SHUP,
+ * lines down / up on the 1080-line plane) and moves its own VobSub and text planes; the PG decoder is started with a
+ * fixed offset of 0 and draws where the disc says (Oppo gap: transport streams have no Subtitle Shift at all). Here
+ * every window and object position of a display set is moved instead. The amount is fixed per epoch (windows must
+ * not move inside one) and limited so that every window stays inside the picture, as the setting does elsewhere.
+ * apply = 0: returns dy limited by the set's windows; 1: moves the set. */
+#define SPS_SHDN     0x9cdc
+#define SPS_SHUP     0x9ce4
+CAVE4 static int pg_dy(u8 *d, u32 total, int H, int dy, u32 apply) {
+    u32 o, l;
+    for (o = 0; o + 3 <= total && (l = 3 + (d[o + 1] << 8 | d[o + 2])) <= total - o; o += l) {
+        u8 *p = d + o, *e = p + l; u32 win = *p == 0x17, k;
+        if (win && l > 3) { k = p[3]; p += 4; }                     /* WDS: id, x, y, w, h */
+        else if (*p == 0x16 && l >= 14) { k = p[13]; p += 14; }      /* PCS: object id, window id, flags, x, y [, crop] */
+        else continue;
+        for (; k; k--) {
+            u32 sz = win ? 9 : 8;
+            if (p + sz > e) break;
+            u8 *yp = p + (win ? 3 : 6); int y = yp[0] << 8 | yp[1];
+            if (!apply) {
+                if (win) { int r = H - (p[7] << 8 | p[8]) - y; if (dy > r) dy = r; if (dy < -y) dy = -y; }
+            } else if (y + dy >= 0 && y + dy < H) { y += dy; yp[0] = y >> 8; yp[1] = y; }
+            if (!win && (p[3] & 0x80)) sz = 16;
+            p += sz;
+        }
+    }
+    return dy;
+}
+
 CAVE4 void pg_feed(void **esh, u32 base) {
     cons_t consume = (cons_t)(base + VA_TSCONSUME);
     struct frag *f = esh[0], *g; u32 total = 0, n = 0, o, l;
@@ -232,15 +362,33 @@ CAVE4 void pg_feed(void **esh, u32 base) {
     u8 *d = (u8 *)(b + 1);
     for (g = f, o = 0; g; g = g->next) for (l = 0; l < g->n; l++) d[o++] = g->p[l];
     for (o = 0; o + 3 <= total && (l = 3 + (d[o + 1] << 8 | d[o + 2])) <= total - o; o += l) n++;
+    /* After a start or a seek the PG decoder skips display sets until one it can start from (epoch start or
+     * acquisition point), and after skipping one it sets no timer for the sets it already holds until more data
+     * arrives (Oppo bug; a transport stream always brings more): in an MKV that is up to 6 s later, and every line in
+     * between was lost. Half of all seeks land on such a set (the "clear" after a line). Give the decoder an empty
+     * epoch start instead: it clears the screen, which is all such a set can do without the sets before it. */
+    if (n && d[0] == 0x16 && (d[1] << 8 | d[2]) >= 11) {
+        volatile struct st *s = ST(base);
+        u32 first = !s->pgsync; int H = d[5] << 8 | d[6], dy = s->pgdy;
+        if (d[10] & 0xc0) s->pgsync = 1;
+        else if (first) { d[10] = 0x80; d[11] = 0; d[13] = 0; }
+        if (s->sps && ((d[10] & 0x80) || first)) {            /* a new epoch, or the first set the decoder takes */
+            dy = *(int *)(s->sps + SPS_SHDN) - *(int *)(s->sps + SPS_SHUP);
+            if (H != 1080) dy = dy * H >> 10;
+            s->pgdy = dy = pg_dy(d, total, H, dy, 0);
+        }
+        if (dy) pg_dy(d, total, H, dy, 1);
+    }
     struct pgpk *k = n ? ((alloc_t)(base + VA_ALLOC))(n * sizeof *k) : 0;
     if (!k) { ((free_t)(base + VA_FREE))(b); goto raw; }
     b->magic = PG_MAGIC; b->esh = esh; b->left = n; b->pk = k;
     u64 pts = *(u64 *)((u8 *)esh + ESH_PTS);
     for (o = 0, l = 0; l < n; l++, k++) {
-        u32 sl = 3 + (d[o + 1] << 8 | d[o + 2]);
+        u32 sl = 3 + (d[o + 1] << 8 | d[o + 2]), fl = sl;
+        if (d[o] == 0x16 && sl >= 14 && !d[o + 13]) { fl = 14; d[o + 1] = 0; d[o + 2] = 11; }   /* no objects (see above) */
         k->f = &k->f1; k->next = 0; k->magic = PG_MAGIC; k->b = b;
         k->f1.p = k->h; k->f1.n = 19; k->f1.next = &k->f2;
-        k->f2.p = d + o; k->f2.n = sl; k->f2.next = 0;
+        k->f2.p = d + o; k->f2.n = fl; k->f2.next = 0;
         k->h[0] = 0; k->h[1] = 0; k->h[2] = 1; k->h[3] = 0xbd; k->h[4] = 0; k->h[5] = 0;
         k->h[6] = 0x80; k->h[7] = 0xc0; k->h[8] = 10;
         pes_ts(k->h + 9, 0x30, pts); pes_ts(k->h + 14, 0x10, pts);
@@ -288,8 +436,9 @@ CAVE3 void mp4_moov(u8 *p, const u8 *b, u32 base) {
     volatile struct st *s = ST(base);
     for (u32 i = 0; i < MAXTRK; i++) s->lang[i] = 0;
     s->tx3g = 0; s->parser = (u32)p; s->skip[0] = s->skip[1] = 0; s->hits[0]++;
-    s->nsd = 0; s->tk_tid = 0xff; s->pgmix = 0;
+    s->nsd = 0; s->tk_tid = 0xff; s->pgmix = 0; s->vprog = 0;
     u32 sel = s->pref[0][0] != 0;   /* track selection only with a language list; chapters always */
+    u32 vs = scan_on(base), vp = 0; /* progressive video? only when the player is to be told */
     struct scan c; c.p = p; c.base = base; c.reads = 0;
     struct trk t[MAXTRK]; u32 n = 0, na = 0, ns = 0;
     u64 pos = *(u64 *)(p + P_BOXPOS) - 4, sz = be32(b), end;
@@ -299,13 +448,17 @@ CAVE3 void mp4_moov(u8 *p, const u8 *b, u32 base) {
     end = pos + sz; pos += hl;
     while ((hl = box(&c, pos, end, &sz, &ty))) {
         if (ty == FCC('u','d','t','a')) scan_chpl(&c, pos + hl, pos + sz, p);
-        else if (sel && n < MAXTRK && ty == FCC('t','r','a','k')) {
-            scan_trak(&c, pos + hl, pos + sz, &t[n]);
-            if (t[n].kind == 1) na++; else if (t[n].kind == 2) ns++;
-            n++;
+        else if (ty == FCC('t','r','a','k')) {
+            if (vs && !vp) vp = vid_trak(&c, pos + hl, pos + sz);
+            if (sel && n < MAXTRK) {
+                scan_trak(&c, pos + hl, pos + sz, &t[n]);
+                if (t[n].kind == 1) na++; else if (t[n].kind == 2) ns++;
+                n++;
+            }
         }
         pos += sz;
     }
+    s->vprog = vp;
     s->scan[0] = c.reads; s->scan[1] = n; s->scan[2] = na << 16 | ns; s->scan[3] = 0;
     if (!sel || c.reads > MAXREADS) return;   /* incomplete: keep the stock choice */
     for (u32 kind = 1; kind <= 2; kind++) {
@@ -375,6 +528,7 @@ u32 mp4_tx3g(u8 *p, u32 base) {
 void mp4_gsi(u8 *p, u32 base) {
     volatile struct st *s = ST(base);
     if ((u32)p != s->parser) return;
+    vid_gsi(p, s, base);
     for (u32 i = 0; i < SLOTS; i++) {
         u32 *r = (u32 *)(p + P_SPSTRM + i * 0x30);
         if (s->tx3g & (1u << i)) {
@@ -416,6 +570,15 @@ void mp4_lang(u8 *x, u32 base) {
     for (u32 i = 0; i < ns && i < SLOTS; i++) send_lang(obj, s, 5, i + 1, p + P_SPREC + i * REC_SIZE, base);
 }
 
+/* PTS of the next subtitle AU already queued (the demuxer reads ahead) if it lies between st and lim, else 0.
+ * 90 kHz in 32 bits: good for 13 hours. */
+CAVE3 static u32 nx_au(u8 *d, u32 st, u32 lim) {
+    volatile u32 *q = (volatile u32 *)(d + SPS_AUQ); u32 h = q[0];
+    if (!q[2] || h >= 0x80) return 0;
+    q += 4 + h * (0x60 / 4) + 4;                           /* AU h: PTS at +0x10 */
+    return !q[1] && q[0] > st && q[0] < lim ? q[0] : 0;
+}
+
 /* After mrSpsDecStringByFmtSRT (text = the sample as is): a tx3g sample is a 2-byte big-endian text
  * length, the UTF-8 text, then optional style boxes. MKV/SRT text never starts with a byte < 8. */
 void mp4_srt(u8 *d, u32 base) {
@@ -429,13 +592,19 @@ void mp4_srt(u8 *d, u32 base) {
     *(u8 **)(d + SPS_TXT) = t + 2; *(u32 *)(d + SPS_LEN) = l;
     /* The MP4 demuxer gives text AUs no end time (-1), which the display shows only for a moment, and a line
      * shown with an end time holds the screen until then. A tx3g line ends where the track's next sample
-     * starts: take that from the next AU already queued (the demuxer reads ahead), else allow 3 s. */
-    volatile u32 *q = (volatile u32 *)(d + SPS_AUQ);
-    u64 st = *(u64 *)(d + SPS_STARTPTS), en = st + 3 * 90000;
-    u32 h = q[0], c = q[2];
-    if (c && h < 0x80) {
-        u64 nx = *(volatile u64 *)(d + SPS_AUQ + 0x10 + h * 0x60 + 0x10);
-        if (nx > st && nx < st + 30 * 90000) { en = nx; s->hits[7]++; }
-    }
+     * starts: take that from the next AU if it is queued already, else allow 3 s for now (tx_end). */
+    u32 st = *(u32 *)(d + SPS_STARTPTS), en = nx_au(d, st, st + 30 * 90000);
+    s->prov = 0;
+    if (en) s->hits[7]++; else s->prov = en = st + 3 * 90000;
     *(u64 *)(d + SPS_ENDPTS) = en;
+}
+
+/* Every round of the subtitle decoder's thread (p_need): the next sample of a tx3g line that got the 3 s allowance
+ * has arrived: the line ends there. Before, a line shorter than 3 s whose end was not read yet stayed too long. */
+CAVE3 void tx_end(u8 *d, u32 base) {
+    volatile struct st *s = ST(base); u32 pv = s->prov, nx;
+    if (!pv) return;
+    volatile u32 *e = (volatile u32 *)(d + SPS_ENDPTS);
+    if (e[0] != pv || e[1]) s->prov = 0;                   /* another AU by now */
+    else if ((nx = nx_au(d, *(u32 *)(d + SPS_STARTPTS), pv))) { e[0] = nx; s->prov = 0; }
 }

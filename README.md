@@ -52,6 +52,8 @@ subtitles keep their timing after a seek, and SD files played in Source Direct r
 - [Better subtitles](#better-subtitles)
 - [MP4 files (v1.8.0)](#mp4-files-v180)
 - [Factory menu](docs/FACTORY.md)
+- [Video options (v2.0.2)](#video-options)
+- [Factory menu](#factory-menu)
 - [Requirements](#requirements)
 - [Compatibility](#compatibility)
 - [Install](#install)
@@ -114,6 +116,11 @@ audio could hang at the loading screen, and profile 7 MP4s from some encoders st
 also on stock firmware). See [fix 25](#25-player-hangs-at-the-next-file-after-an-mp4-was-stopped-v201), [fix 26](#26-profile-7-mp4-stops-a-second-after-it-starts-v201)
 and the [changelog](#changelog).
 
+**Since v2.0.2 (beta):** three [video options](#video-options) in a text file on the stick, all off unless you turn
+them on: HD films at 25 or 30 frames/s sent at 25 / 30 Hz instead of 50 / 60 Hz, the home menu at 60 Hz on RU, EU
+and AU firmware, and the language a factory reset sets. Also subtitle timing fixes (PGS next to other formats, MP4
+text subtitles); see the [changelog](#changelog).
+
 ## Oppo bugs fixed: subtitles and picture
 
 While making MKV and MP4 files play properly, a number of bugs in Oppo's own firmware turned up. All of them are
@@ -136,6 +143,7 @@ MKV fix, and every place is checked before it is written.
 | 🌗 | **Dolby Vision picture not as graded in TV-led mode**: lifted shadows not lifted, very bright scenes mapped as if dimmer, trims ignored | Dolby Vision with CM 2.9 metadata (L1 above the mastering level, positive L2 lift, L5) | ✅ same as the TV's own player | v2.0.0 | [fix 24](#24-tv-led-dolby-vision-metadata-lost-on-the-way-to-the-tv-cm-29-and-cm-40-v200) |
 | 🌗 | **CM 4.0 metadata never reaches the TV** (the TV falls back to the CM 2.9 trims) | Dolby Vision with CM 4.0 metadata (L3, L8, L9, L11, L254) | ✅ sent to the TV | v2.0.0 | [fix 24](#24-tv-led-dolby-vision-metadata-lost-on-the-way-to-the-tv-cm-29-and-cm-40-v200) |
 | ⏳ | **Player hangs at the loading screen** (50 / 75 / 100 %) of the next file, until it is power-cycled | any file started after an MP4 with audio was stopped | ✅ starts | v2.0.1 | [fix 25](#25-player-hangs-at-the-next-file-after-an-mp4-was-stopped-v201) |
+| 🎞️ | **25 and 30 frames/s films played at 50 / 60 Hz**: the player takes every such file for interlaced | HD H.264 and HEVC in MKV and MP4, at 25, 29.97 or 30 frames/s | ✅ 25 / 30 Hz with the option `native_25p`; real 1080i still at 50 / 60 Hz | v2.0.2 | [fix 27](#27-25-and-30-framess-files-played-at-50--60-hz-v202) |
 | ⏹️ | **Playback stops about a second after it starts** | Dolby Vision profile 7 MP4 (both layers in one track) from x265, several frames per chunk | ✅ plays, with FEL | v2.0.1 | [fix 26](#26-profile-7-mp4-stops-a-second-after-it-starts-v201) |
 | 🙈 | **No subtitles at all** in most ordinary MP4 films | MP4 with 2+ audio and 2+ subtitle tracks, or big low-bitrate files | ✅ shown | v1.8.0 | [fix 15](#15-mp4-subtitles-hidden-by-the-bad-interleave-mode-v180) |
 | 🔤 | **MP4 text subtitles not shown**, no languages in the menus | MP4 with `tx3g` / `mov_text` | ✅ shown, languages listed | v1.8.0 | [fix 16](#16-mp4-text-subtitles-languages-and-the-8-tracks-v180) |
@@ -246,6 +254,97 @@ installer. For a file with more than 8 tracks of a kind, the 8 are then chosen l
 
 The menus list the chosen tracks in file order. Running the installer again without the file on the stick keeps your
 list; the file as shipped (no languages) switches the list off. `dvmkv.log` shows `dvhook: MP4 language list: en pt`.
+
+## Video options
+
+Three settings that Oppo's Setup menu does not have. They are part of the Dolby Vision MKV fix and are set in a text
+file, **`oppo-dv-mkv-options.txt`**, that comes in the zip next to the `AutoScript` folder. All three ship
+**off** (`stock`): nothing changes until you edit the file. To change one, edit the file on the USB stick and run
+the installer again (see [Install](#install)); running the installer without the file keeps what is installed.
+
+```
+native_25p = on
+menu_refresh = 60
+default_language = en
+```
+
+| Option | Values | What it does |
+|---|---|---|
+| `native_25p` | `on`, `off` | HD files at 25, 29.97 or 30 frames/s play at that rate instead of 50 / 60 Hz |
+| `menu_refresh` | `60`, `50`, `stock` | refresh rate of the home menu and screen saver |
+| `default_language` | `en de fr es it sv nl pl zh ja ru`, `stock` | the languages a factory reset sets |
+
+### `native_25p`: 25 and 30 frames/s at their own rate
+
+Stock, an HD file at 25 frames/s is sent to the TV at 50 Hz, and one at 29.97 or 30 at 60 Hz, each frame twice.
+The motion is the same, but the TV is not told what the film's real rate is. With `native_25p = on`:
+
+| File (MKV or MP4, H.264 or HEVC) | Output Resolution | Stock | `native_25p = on` |
+|---|---|---|---|
+| 1080p25 | Auto (4K TV) | 2160p50 | **2160p25** |
+| 1080p25 | Source Direct | 1080i50 | **1080p25** |
+| 1080p30 / 29.97 | Auto (4K TV) | 2160p60 | **2160p30** |
+| 720p25 | Auto (4K TV) | 2160p50 | **2160p25** |
+| 720p25 | Source Direct | 720p50 | 720p50 (HDMI has no 720p25) |
+| 1080i25 (interlaced: TV recordings, concerts) | Auto / Source Direct | 2160p50 / 1080i50 | unchanged |
+| 2160p25 | any | 2160p25 | unchanged |
+| 24, 50, 60 frames/s | any | native | unchanged |
+| SD (576 / 480 lines) | any | 50 / 60 Hz | unchanged |
+
+The player sends 25 or 30 Hz only if the TV lists that mode; otherwise it picks what it picked before. Whether a
+file is progressive or interlaced is read from the video itself, so an interlaced 1080i file is still deinterlaced
+and played at 50 / 60 Hz as before. TS and M2TS files, and MPEG-2 or VC-1 video in any container, are not changed.
+The why is in [fix 27](#27-25-and-30-framess-files-played-at-50--60-hz-v202).
+
+### `menu_refresh`: the home menu at 60 Hz
+
+The players sold in PAL countries (RU, EU and AU firmware) show the home menu and the screen saver at 50 Hz, and
+after a 4K film at 25 frames/s the menu stays at 25 Hz, where the cursor moves in visible steps. `menu_refresh = 60`
+makes them use 60 Hz (2160p60 with Output Resolution Auto, 1080p60 with 1080p Auto or Source Direct), from power-on
+and after every film; `50` keeps 50 Hz but no longer stays at 25. Playback is not touched: a film still plays at its
+own rate. The US, JP, CN and TW firmware already prefer 60 Hz; there the option does nothing (the log says "not
+supported on this player program").
+
+### `default_language`: what a factory reset sets
+
+**Setup > Device Setup > Reset Factory Defaults** puts the player's menus, the disc menu language and the audio
+language back to the firmware's own: Russian on the RU firmware many jailbroken players run. With
+`default_language = en` (or one of the other codes) a reset sets that language instead, and subtitles to Auto (to the
+same language for `zh`, `ja` and `ru`, as the regional firmware does). Your current settings are not changed by
+installing; the option only changes what the next reset writes.
+
+## Factory menu
+
+The player has a hidden service page, the **Factory Page**. Its stock trigger needs keys that only Oppo's factory
+remote has. With the factory menu shortcut installed, the normal remote opens it:
+
+1. Press **Setup** and open **Playback Setup**.
+2. Move the cursor to the **second item, Gapless Playback**. Do not press Enter.
+3. Press **0 0 0 0**.
+
+The page shows the firmware version, sub version and loader version, the DVD and Blu-ray region codes, and some
+service buttons. Close it with Return.
+
+> ⚠️ **Look, but do not press anything on this page unless you know exactly what it does.**
+> - **Fmt buda** and **Fmt apda** **format** storage areas of the player.
+> - The **region** fields change the player's stored DVD / Blu-ray region. This was not tested. The code that saves
+>   a new region also resets other data, which was not analysed.
+> - **Reset Password** was not tested either.
+
+Opening the page runs Oppo's own code, unchanged, and that code also does two things until the next power cycle:
+- **The firmware update stops checking the region/model tag** of update files. Do not run update files meant for
+  another region or model while it is off (power-cycle first).
+- **It starts `inetd`, a telnet server.** It can only listen when the player's network (IP) control is switched off,
+  because both use port 23, and logging in needs the player's root password, which is not known. (Switching IP control
+  off froze the Setup menu once during testing; a power cycle fixed it.)
+
+How it works: the page's trigger in the player program waits, with Gapless Playback highlighted, for the factory
+keys F3, F5 and F11. The shortcut replaces these three keys by the digit 0, in place (5 small edits, in RAM, at every
+boot): the first 0 arms the trigger, three more open the page, any other key cancels. Nothing else changes.
+Like the subtitle patch, it carries one layout per regional v65 player program (RU, EU, AU, CN, TW, JP, US/default;
+in the US program the trigger code is laid out differently, so the arming branch is re-encoded for it) and picks the
+one matching the running program, jailbroken or run by jb_overlay. Tested on a real player only with the RU program.
+On a program that matches no layout the installer skips it and writes why in `oppo-dv-mkv-result.txt`.
 
 **Cambridge Audio CXUHD:** its firmware (66-0614) still has Oppo's older trigger, which takes normal remote keys, so
 there is nothing to install: **Setup > Playback Setup, cursor on the second item, then BLUE, 2, 4, 5, 8** (BLUE
@@ -365,7 +464,8 @@ it privately.
    Every part is checked on its own (see [Compatibility](#compatibility)). A part that cannot be installed safely on
    your player is skipped, and the others are still installed.
 2. Unzip it to the **root** of a FAT32 USB stick. You should see `AutoScript/` and `README.txt` at the top level of
-   the stick (and `oppo-dv-mkv-languages.txt` in zips with the Dolby Vision part, see [Language list](#language-list)).
+   the stick (and `oppo-dv-mkv-languages.txt` and `oppo-dv-mkv-options.txt` in zips with the Dolby Vision part, see
+   [Language list](#language-list) and [Video options](#video-options)).
 3. Power the player **off**. Plug the stick into the **rear** USB port, and make sure no other USB storage is
    connected. Power the player **on**.
    - At boot the player runs `AutoScript/install.sh` from the stick. It takes a second or two.
@@ -452,6 +552,12 @@ are not.
 - **Resuming within the last minute or so of a P7 film** froze the picture once during development, right after a
   test patch was loaded into the running player (the audio clock kept running). It did not happen again in more
   than 25 later jumps and resumes in the last five minutes with v1.3.1. If it does: Stop, then play again.
+
+- **`native_25p`** covers H.264 and HEVC in MKV and MP4. TS / M2TS files, MPEG-2 and VC-1 video, and SD files play
+  at 50 / 60 Hz as before. A file whose H.264 stream is flagged for interlaced coding but holds progressive frames
+  (some broadcast and disc sources at 25 frames/s) is treated as interlaced, as before.
+- **`menu_refresh`** exists for the RU, EU and AU player programs; **`default_language`** was not tested with a real
+  factory reset.
 
 ## Troubleshooting
 
@@ -956,6 +1062,27 @@ first enhancement-layer NAL then finds no open batch and takes the path it takes
 Checked before it is written; the code is the same in every firmware we have a dump of. Details:
 [docs/TECHNICAL.md](docs/TECHNICAL.md), Part 2b-3.
 
+### 27. 25 and 30 frames/s files played at 50 / 60 Hz (v2.0.2)
+
+**Symptom:** a 1080p film at 25 frames/s in an MKV or MP4 goes to the TV as 2160p50 (Output Resolution Auto) or
+1080i50 (Source Direct), one at 29.97 or 30 as 60 Hz. A 4K file at 25 frames/s plays at 25 Hz, and so does a
+Blu-ray. Also on stock firmware.
+
+**Cause:** for every stream the playback library hands the player program a description with a field "progressive
+or interlaced". For Blu-ray discs it is filled in. The MKV and the MP4 parser never fill it in, although both have
+the H.264 / HEVC headers that say so in their hands. With the field empty the player program guesses: below
+2000x1200, at 25, 29.97 or 30 frames/s, "interlaced", and an interlaced source is deinterlaced to twice the rate.
+In Source Direct a second rule doubles 25 and 30 Hz again for every output below 2160 lines.
+
+**Fix (option `native_25p`, off unless you turn it on, see [Video options](#video-options)):** two parts. In the
+playback library (`dvhook.sh`) the two parsers now read the answer where they already hold the headers: for H.264
+the SPS field `frame_mbs_only_flag`, for HEVC the two source flags of the profile block. Only "progressive" is
+passed on, and only for 720 lines and up; an interlaced file, another codec or a header that cannot be read leaves
+the field empty, and the player guesses as before. In the player program (`vidopt.sh`) one compare in the Source
+Direct rule changes, so that 1080-line outputs keep 25 and 30 Hz. A first version of this option changed the
+player's guess instead; it also turned real 1080i files into 25 Hz with combing, and was dropped for reading the
+stream. Details: [docs/TECHNICAL.md](docs/TECHNICAL.md), Parts 1d and 5.
+
 ## Tests
 
 All tests were run on one Oppo UDP-203 with the RU 65-0131 jailbreak, connected through an AV receiver to a Dolby
@@ -1235,6 +1362,33 @@ log read at every stop.
 Not tested: an MP4 whose enhancement-layer parameter sets are only in the `hvcE` box; long films in profile 7 MP4;
 players other than the RU one (simulated only).
 
+### Video options (v2.0.2)
+
+On the RU player and an LG C1. The output mode was read from the player program's own source description and the
+TV's input status (the C1 now and then reports 2160p25 as 24 Hz; the player's log decides).
+
+| Clip (30 s, frame counter burnt in) | Auto, stock | Auto, `native_25p` | Source Direct, stock | Source Direct, `native_25p` |
+|---|---|---|---|---|
+| 1080p25 H.264, MKV and MP4 | 2160p50 | ✅ 2160p25 | 1080i50 | ✅ 1080p25 |
+| 1080p25 HEVC, MKV and MP4 | 2160p50 | ✅ 2160p25 | | ✅ 1080p25 |
+| 1080p30 H.264, MKV | 2160p60 | ✅ 2160p30 | 60 Hz | ✅ 1080p30 |
+| 720p25 H.264, MKV and MP4 | 2160p50 | ✅ 2160p25 | | 720p50, as intended |
+| 1080i25 H.264 (truly interlaced), MKV and MP4 | 2160p50 | ✅ 2160p50 | 1080i50 | ✅ 1080i50 |
+| 576p25 H.264, MKV | 2160p50 | ✅ unchanged | | ✅ 576 lines, 50 Hz |
+| 2160p25 HEVC, 1080p24, 1080p50 | native | ✅ unchanged | native | ✅ unchanged |
+| 1080p25 H.264, M2TS | 2160p50 | unchanged (not covered) | | |
+
+- The header reader was also run on a PC over 32 encodes (x264 Baseline to High 4:4:4, 8 and 10 bit, with and
+  without scaling matrices, interlaced and "fake interlaced", x265 progressive and interlaced, `hvc1` and `hev1`):
+  "progressive" for the 24 progressive ones, and for none of the 8 coded as interlaced.
+- Dolby Vision profile 7 and 8, MKV and MP4, still start in Dolby Vision with the option on.
+- `menu_refresh = 60`: home menu at 2160p60 (Auto) and 1080p60 (Source Direct) right after power-on and after 24,
+  25 and 50 Hz films; three cold boots.
+- `default_language`: the four defaults read back as set (`en/en/en/auto`). A real factory reset was **not** run.
+- Offline: the option tables for the eleven player programs we hold, applied to a copy of each program's memory and
+  taken off again (byte-identical afterwards); the re-ordered branches disassembled; a program changed inside a
+  patched block is refused.
+
 ### Extras (v1.7.1)
 
 | Test | Result |
@@ -1405,6 +1559,28 @@ requests.
 </p>
 
 ## Changelog
+
+- **v2.0.2-beta: video options (25 / 30 frames/s at their own rate, 60 Hz menu, reset language); subtitle
+  timing.** A beta: tested on one player (RU) and one TV (LG C1). A new file on the stick,
+  `oppo-dv-mkv-options.txt`, holds three settings, all off unless you turn them on. See
+  [Video options](#video-options).
+  - **`native_25p`:** HD H.264 and HEVC in MKV and MP4 at 25, 29.97 or 30 frames/s plays at that rate (2160p25/30
+    in Auto, 1080p25/30 in Source Direct) instead of 50 / 60 Hz. The parsers now tell the player which files are
+    progressive (Oppo's gap, also on stock); interlaced 1080i files play as before. See
+    [fix 27](#27-25-and-30-framess-files-played-at-50--60-hz-v202).
+  - **`menu_refresh`:** home menu and screen saver at 60 Hz on the RU, EU and AU firmware, from power-on.
+  - **`default_language`:** the language a factory reset sets (English instead of Russian on the RU firmware).
+  - **PGS lines late, missing or left on screen** in MKVs that have a Blu-ray PGS track next to subtitles in
+    another format (Oppo's bugs, in the subtitle decoder v1.9.0 put in charge of such files): the decoder looked
+    at the PGS timers only when more subtitle data arrived, could wipe a timer just set, and after a start or a
+    seek showed nothing for up to 6 seconds. PGS in TS / M2TS files uses the same code and now shows from the
+    first line. MKVs whose subtitles are all PGS are unchanged.
+  - **Subtitle Shift now also moves PGS** in those MKVs; a large shift stops at the edge of the picture.
+  - **MP4 text subtitles (`tx3g`) left on screen too long:** a line whose end was not read yet stayed 3 seconds.
+    It now ends when the next sample arrives.
+  - Updating from v2.0.1-beta adds `vidopt.sh` and replaces `dvhook.sh` and `dvmkv.sh`. `dvmkv.sh` applies the
+    video options as soon as the player program has started, before the first menu is drawn. Without an
+    `oppo-dv-mkv-options.txt` on the stick, or with it as shipped, nothing about the picture output changes.
 
 - **v2.0.1-beta: hangs when a file starts; profile 7 MP4s that stop after a second.** A beta: tested on one
   player (RU) and one TV (LG C1).

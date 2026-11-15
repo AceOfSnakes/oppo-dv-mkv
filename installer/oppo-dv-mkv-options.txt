@@ -1,0 +1,25 @@
+# oppo-dv-mkv: video options
+#
+# Change a value, keep this file next to the AutoScript folder on the USB stick and run the installer again. Running
+# the installer without this file keeps the options already installed. "stock" (or no value) = the player's own way.
+#
+# native_25p = on | off
+#   HD video (MKV and MP4, H.264 or HEVC, 720 lines and up) at 25, 29.97 or 30 frames per second plays at that rate:
+#   Output Resolution Auto -> 2160p25 / 2160p30 (when the TV accepts it), Source Direct -> 1080p25 / 1080p30.
+#   off = stock: it plays at 50 / 60 Hz (every frame shown twice; the motion looks the same), because the player is
+#   never told that such a file is progressive and takes it for interlaced.
+#   Interlaced video (1080i TV recordings, concert and TV-series discs) is recognised and plays as before, at 50 / 60 Hz.
+#   Not changed: SD files, 720p in Source Direct (HDMI has no 720p25), TS / M2TS files, MPEG-2 and VC-1 video.
+native_25p = off
+#
+# menu_refresh = 60 | 50 | stock
+#   Refresh rate of the home menu and screen saver (nothing playing) with Output Resolution Auto, UHD Auto, 1080p Auto
+#   or Source Direct. stock: RU, EU and AU firmware use 50 Hz (and stay at 25 Hz after a 4K 25p file).
+#   US, JP, CN and TW firmware already use 60 Hz; there this option does nothing.
+menu_refresh = stock
+#
+# default_language = en | de | fr | es | it | sv | nl | pl | zh | ja | ru | stock
+#   The language that Setup > Device Setup > Reset Factory Defaults sets for the player's menus, disc menus and
+#   audio (subtitles: Auto, or the same language for zh, ja, ru). Your current settings are not changed.
+#   stock: the firmware's own (Russian on RU firmware, English on US/EU/AU).
+default_language = stock

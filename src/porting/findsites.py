@@ -126,6 +126,49 @@ def fp_sites(e, ref, r):
     o = e.off(k); n = c + 0x30 - k   # fingerprint: both blocks and the code between them
     r['funcs']['fpage'] = {'va': k, 'off': o, 'len': n, 'md5': hashlib.md5(e.d[o:o + n]).hexdigest()}
 
+# video options (src/video/vidopt.sh). Three independent parts; each is mapped on its own.
+# 25p/30p (native): FUN_007cc254 guesses "interlaced" for files whose scan type is unknown (MKV/MP4 always, stock)
+#   when they are below 2000x1200 at 25/29.97/30 fps (doubled to 50/59.94/60). That part is solved in liblp, which
+#   now says which videos are progressive (src/liblp: dvhook.sh scan on). Left for the program: FUN_007cf354, Source
+#   Direct: outputs below 2160 lines get those rates doubled once more: the limit 0x870 -> 0x438 keeps 1080-line
+#   outputs at the source rate (720/576/480 have no 25/30 modes). The block is the same in every build.
+# menu refresh: FUN_007cf354 picks the output with nothing playing ("idle"): Auto/UHD Auto test "rate is 50" before
+#   "idle" and prefer 2160p50, 1080p Auto prefers 1080p50, Source Direct idle is hard-coded 50 Hz (PAL programs only;
+#   the US-family code is different and already prefers 60). The compare blocks are re-ordered in place (same size)
+#   so that idle comes first and goes to the 60-first (or 50-first) checks that already exist.
+# languages: the factory-default OSD / disc menu / audio / subtitle languages (4 halfwords in .data, applied by Setup >
+#   Reset Factory Defaults through the acfg item table), found between two constant byte strings.
+V_SD = (0x7cf536, 0x7cf576); V_TX = (0x7cf4ca, 0x7cf856); V_TXPOOL = (0x7cf680, 0x7cf694)
+V_LANG = re.compile(rb'\x01\x02\x01\x01\x02\x00(.{8})\x01\x01OPPO_PLA', re.S)
+V_SITES = {   # name: (block, offset in block, original, patched [, patched for 50 Hz])
+    'v_sd25':   ('sd', 0x1a, 'b3f5076f', 'b3f5876f'),                    # cmp.w r3, #0x870 -> #0x438
+    'v_sdidle': ('tx', 0x00a, '4ff00303', '4ff00103', '4ff00303'),        # Source Direct idle: mov.w r3, #3 (50 Hz) -> #1 (60)
+    'v_p1080':  ('tx', 0x13a, '062e04d0032e02d0baf1000f06d0', 'baf1000f0ad1062e01d0032e06d1', 'baf1000f03d1062e01d0032e06d1'),
+    'v_auto':   ('tx', 0x222, '062e05d0032e05d0baf1000f02d12fe0', 'baf1000f47d1062e02d0032e02d02fe0',
+                 'baf1000f06d1062e02d0032e02d02fe0')}
+
+def vid_sites(e, ref, r):
+    blocks = {}
+    for k, (a, b), pool in (('sd', V_SD, None), ('tx', V_TX, V_TXPOOL)):
+        code, mask = relmask(ref, a, b)
+        if pool: mask[pool[0] - a:pool[1] - a] = bytes(pool[1] - pool[0])
+        h = find(e, code, mask)
+        if len(h) == 1: blocks[k] = (h[0], b - a)
+        elif k != 'tx': r['errors'].append(f'video options: {k} block found {len(h)} times')
+    for s, (k, off, orig, *new) in V_SITES.items():
+        if k not in blocks: continue
+        va = blocks[k][0] + off; cur = e.rd(va, len(orig) // 2).hex()
+        if cur != orig: r['errors'].append(f'video options: {s} {cur} at {va:#x}, expected {orig}'); continue
+        r['sites'][s] = {'va': va, 'orig': orig, 'new': new[0], **({'new50': new[1]} if len(new) > 1 else {})}
+    for k, (va, n) in blocks.items():
+        o = e.off(va); r['funcs']['v' + k] = {'va': va, 'off': o, 'len': n, 'md5': hashlib.md5(e.d[o:o + n]).hexdigest()}
+    d = [s for s in e.segs if s[4] & 2][0]
+    h = list(V_LANG.finditer(e.d, d[1], d[1] + d[2]))
+    if len(h) == 1:
+        va = e.va(h[0].start(1)); o = h[0].start()
+        r['sites']['v_lang'] = {'va': va, 'orig': h[0].group(1).hex()}
+        r['funcs']['vlang'] = {'va': e.va(o), 'off': o, 'len': 24, 'md5': hashlib.md5(e.d[o:o + 24]).hexdigest()}
+
 def port(path, ref):
     e = Elf(path); r = {'path': path, 'md5': hashlib.md5(e.d).hexdigest(), 'sites': {}, 'funcs': {}, 'errors': []}
     deltas = {}
@@ -148,6 +191,7 @@ def port(path, ref):
         r['funcs']['colors'] = {'va': hits[0], 'off': e.off(hits[0]), 'len': len(want), 'md5': hashlib.md5(want).hexdigest()}
         r['sites']['preview'] = {'va': hits[0] + 0x60, 'orig': want[0x60:].hex()}
     fp_sites(e, ref, r)
+    vid_sites(e, ref, r)
     return r
 
 if __name__ == '__main__':

@@ -72,9 +72,10 @@ written.
 
 | What | Offset | Size | Notes |
 |---|---|---|---|
-| Part 1 blob + `dvvC` shims | `0x6cdc00` | 950 of 0x400 | RX padding |
+| Part 1 blob + `dvvC` shims | `0x6cdc00` | 1012 of 0x400 | RX padding |
 | MP4 main blob (shims, hooks, ISO 639 table, chapters) | `0x5402fc` | 0xae8 | over `vMPCTestOperation4`, an MPC self-test only called by other self-tests |
 | MP4 pre-scan blob | `0x530de8` | 0x9e4 | over `vMPCTestDvdRwdSpeedThr` (self-test thread entry) |
+| Scan-type blob (Part 1d) | `0x530490` | 1318 of 0x958 | over `vMPCTestDvdRwdThr` (self-test thread entry, only referenced by `i4MPCTestPlayDvdRwd`) |
 | MP4 state | `0x757e80` | 0xe8 | bss slack: parser pointer, languages by track_ID, tx3g mask, language list, skip bitmap, counters |
 
 Blob code addresses its own tables as `base + link address` (a plain table read would hit the player program).
@@ -229,6 +230,48 @@ point); the line after it is on time.
 `pg_mode`, `p_same`, `p_scr`, `p_texp`, `p_start`: 84 checks. On the player, a console log with every debug module
 of the player program on shows the PG decoder's own messages; the pictures were checked with the TV's screen
 capture of the HDMI input.
+
+## Part 1d: liblp.so, progressive or interlaced (option `native_25p`, v2.0.2)
+
+**The gap.** `MPCVidElmStrmInf` (0x140 bytes, handed to the MPC with `mrSetStreamInfo`) has a scan type at `+0x2c`:
+0 unknown, 1 progressive, 2 interlaced. The Blu-ray path sets it. `CLpMkvParser::vGetVidStrmInf` and
+`CLpMp4Parser::mrGetStreamInfo` never write it. The player program copies it to its source description
+(`0x13425ac` in the RU program, `+0x34`) and decides in `FUN_007cc254`: scan known and not 24 fps and below
+2000x1200 -> use it; unknown -> "interlaced" when the rate is 25, 29.97 or 30 and the picture is below 2000x1200,
+else progressive. An interlaced source gets twice the rate. Forcing the field to 1 or 2 in a test build switched a
+1080p25 MKV between 25 and 50 Hz, with no change in the program.
+
+**Reading it.** New code in a fourth self-test function, `vMPCTestDvdRwdThr` (`0x530490`, 0x958 bytes; blob
+`mp4d.bin`, section `.cave5` of the MP4 ELF, 1318 bytes):
+
+- `avc_prog(avcC)`: takes the first SPS of the record, removes the emulation-prevention bytes (up to 192 bytes) and
+  walks it to `frame_mbs_only_flag`: profile/level, `seq_parameter_set_id`, for the High-family profiles the chroma
+  format, bit depths and scaling lists, then frame-number and picture-order fields, reference frames, width and
+  height. Running out of bits, or an SPS count of 0, gives "unknown".
+- `hevc_prog(hvcC)`: byte 6 of the record, `general_progressive_source_flag` set and
+  `general_interlaced_source_flag` clear.
+
+Only "progressive" is ever reported. Interlaced, a field-coded H.264 stream with progressive content, MPEG-2, VC-1
+and anything unreadable stay "unknown" and get the program's stock guess, so nothing that played at 50 / 60 Hz for
+a good reason changes.
+
+**MKV.** `CLpMkvParser::mrParseTrackEntry` reads every track's CodecPrivate into a buffer (`sl`, length at
+`[sp, #0x20]`) and, for a video track, takes profile and level from it: `V_MPEG4/ISO/AVC` at `0x3c0450`, HEVC at
+`0x3c04ac`. In each block one `mov r3, #1` (`0x3c0468`, `0x3c04c4`) becomes a `bl` to a shim (`k_avc`, `k_hevc`)
+that calls the reader and does the `mov`. The result and the parser pointer go to dvhook's state (`+0x41 prog`,
+`+0x44 progp`); `dv_clear` (start of every Tracks element) forgets it. `dv_decide` (H2) copies it to `vprog` when
+the parser is the one being played and the switch `scanon` (`+0x42`) is set, and `dv_vinfo` (H3) writes `+0x2c = 1`
+when the height (`+0x18`) is 720 or more.
+
+**MP4.** The moov pre-scan (`mp4_moov`) calls `vid_trak` for each trak until one answers: `mdia/hdlr` = `vide`,
+then `minf/stbl/stsd`, up to 0x1c0 bytes of it, the boxes after the 78-byte visual sample entry, `avcC` or `hvcC`.
+It runs only with the switch on. `mp4_gsi` (after `mrGetStreamInfo`) writes `+0x2c` of the parser's video record
+(`parser + 0x7400`): 1 for progressive and 720 lines or more, else 0.
+
+**The switch.** `dvhook.sh scan on|off` writes `scanon`. `dvmkv.sh` runs `scan on` after `dvhook.sh on` when
+`vidopt.sh get native_25p` answers `on`. With the switch off the hooks still read the headers but nothing is passed
+on. SD is left out on purpose: a 576p25 file flagged progressive would be sent in Source Direct at a rate HDMI has
+no 576-line mode for.
 
 ## Part 2: bdpdrv1 (profile 7)
 
@@ -946,6 +989,39 @@ table) arms, any other key disarms, and the buffer is compared with `02 04 05 08
 the page with the normal remote and nothing is patched: `fpage.sh` names the keys and exits with 2, the installer
 reports the part as "not needed". `fpage.sh` finds the player by name, picks the layout of the running
 program and writes through `/proc/<pid>/mem`, after checking every site holds the original or the patched bytes.
+
+## Part 5: video options in the player program (`vidopt.sh`, v2.0.2)
+
+RAM patches of `bdpprog.1`, applied by `dvmkv.sh` as soon as the process exists (before `liblp.so` is even mapped:
+the program picks its first HDMI output about 9 s after boot and keeps it until something is played). Options come
+from `options.txt` (the stick's `oppo-dv-mkv-options.txt`); `vidopt.sh apply | off | status | check | get NAME`.
+Addresses below are the RU program's; the tables are generated per program (next section).
+
+**`native_25p`, the program half.** `FUN_007cf354` switches the HDMI output. In its Source Direct case (0x11) the
+rates 25/29.97/30 are doubled for every output below 2160 lines: `cmp.w r3, #0x870` at `0x7cf550`. The limit
+becomes `#0x438`: 1080-line outputs keep the source rate, 720/576/480 are still doubled (HDMI has no 25/30 Hz modes
+for them). The other half is in liblp (Part 1d). The rate codes of the source description (`+0x44`): 1 = 60,
+2 = 59.94, 3 = 50, 4 = 30, 5 = 29.97, 6 = 25, 7 = 24, 8 = 23.976.
+
+**`menu_refresh`.** With nothing playing ("idle") the PAL programs (RU, EU, AU) test "last rate was 50" before
+"idle" in Auto / UHD Auto and prefer 2160p50; 1080p Auto prefers 1080p50; Source Direct idle is a constant 3
+(50 Hz). The idle rate is otherwise the rate of the last output, hence 25 Hz menus after a 2160p25 film. Three
+sites: `mov.w r3, #3` -> `#1` at `0x7cf4d4`, and the compare chains at `0x7cf604` (14 bytes) and `0x7cf6ec` (16
+bytes) re-ordered in place so that idle is tested first and branches to the 60-first checks the code already has
+(for `menu_refresh = 50`, to the 50-first ones). The US-family programs (US, JP, CN, TW) are built differently and
+already prefer 60 Hz: no layout, the option reports "not supported".
+
+**`default_language`.** Four halfwords in `.data` between the constants `01 02 01 01 02 00` and `01 01 "OPPO_PLA"`
+(`0x12321ee`): OSD, disc menu, audio and subtitle language, as indexes into the program's 10-byte ISO 639 table
+(`0x7e` English, `0x16c` Russian, `0x1e4` Auto). RU has `6c01` four times, EU/AU/US `7e00 7e00 7e00 e401`.
+Setup > Reset Factory Defaults (`FUN_00888bb8`) resets the settings items from these at run time, so the RAM patch
+is what a reset reads. The reset the firmware does by itself at boot when its settings fail their check runs before
+the patch.
+
+`findsites.py` finds the Source Direct block and the output-switch block as wildcarded patterns from the reference
+and the language words by their two neighbours; `mklayouts.py` writes the three tables (`L25`, `LHZ`, `LLANG`) into
+`vidopt.sh`, each line with a fingerprint of the block it patches. A site that holds neither the original nor one of
+our own values is reported as "unexpected" and nothing is written.
 
 ## Player program layouts
 
