@@ -18,8 +18,10 @@ native_25p = off
 #   US, JP, CN and TW firmware already use 60 Hz; there this option does nothing.
 menu_refresh = stock
 #
-# default_language = en | de | fr | es | it | sv | nl | pl | zh | ja | ru | stock
+# default_language = en | de | fr | es | it | sv | nl | pl | zh | zh-tw | ja | ru | stock
 #   The language that Setup > Device Setup > Reset Factory Defaults sets for the player's menus, disc menus and
 #   audio (subtitles: Auto, or the same language for zh, ja, ru). Your current settings are not changed.
+#   zh = Simplified Chinese menus. zh-tw = Traditional Chinese menus, English disc menus and audio, Chinese
+#   subtitles (what the TW firmware sets).
 #   stock: the firmware's own (Russian on RU firmware, English on US/EU/AU).
 default_language = stock

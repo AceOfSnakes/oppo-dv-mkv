@@ -1013,7 +1013,11 @@ already prefer 60 Hz: no layout, the option reports "not supported".
 
 **`default_language`.** Four halfwords in `.data` between the constants `01 02 01 01 02 00` and `01 01 "OPPO_PLA"`
 (`0x12321ee`): OSD, disc menu, audio and subtitle language, as indexes into the program's 10-byte ISO 639 table
-(`0x7e` English, `0x16c` Russian, `0x1e4` Auto). RU has `6c01` four times, EU/AU/US `7e00 7e00 7e00 e401`.
+(`0x7e` English, `0x16c` Russian, `0x50` Chinese, `0x1e4` Auto). RU has `6c01` four times, EU/AU/US `7e00 7e00 7e00 e401`,
+CN `5000` four times, TW `e601 7e00 7e00 5000`. `0x1e6` lies past the end of the ISO table (`0x1e4` entries): it is the
+Traditional Chinese entry of the menu language list (`2, 7e 6d 8d 193 cc 19e 76 15c 50 1e6 cf 16c 1e4` at `0x122670c`
+in the RU program; the same list in every program we hold, CXUHD without Polish), and is used for the OSD only.
+`zh-tw` writes the TW set.
 Setup > Reset Factory Defaults (`FUN_00888bb8`) resets the settings items from these at run time, so the RAM patch
 is what a reset reads. The reset the firmware does by itself at boot when its settings fail their check runs before
 the patch.

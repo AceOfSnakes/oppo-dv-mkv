@@ -12,15 +12,16 @@
 #   menu_refresh = 60 | 50 | stock   refresh rate with nothing playing (home menu, screen saver) in Auto, UHD Auto,
 #                                    1080p Auto and Source Direct. Stock PAL-region programs (RU, EU, AU) prefer 50 Hz
 #                                    and come back after a 25 fps file at 25 Hz; the US-family ones already prefer 60.
-#   default_language = en de fr es it sv nl pl zh ja ru | stock
+#   default_language = en de fr es it sv nl pl zh zh-tw ja ru | stock
 #                                    what Setup > Device Setup > Reset Factory Defaults sets as menu (OSD), disc menu
 #                                    and audio language (subtitle: the same for zh/ja/ru, else Auto as US players do).
-#                                    Today's settings are not touched.
+#                                    zh = Simplified Chinese menus (as CN), zh-tw = Traditional Chinese menus with
+#                                    English disc menu and audio and Chinese subtitles (as TW). Today's settings are not touched.
 # Why (Oppo code, per player program): see README "Video options" and src/porting/findsites.py. Layouts are written by
 # src/porting/mklayouts.py; each part is chosen by fingerprints of its code in the running program file.
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin
 PROC=${OPPODV_PROC:-/proc}; CMD=$1; OPT=${2:-/mnt/ubi_boot/oppo-dv-mkv/options.txt}
-val(){ [ -f "$OPT" ] && tr -d '\r' < $OPT | grep -v '^[[:space:]]*#' | sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\([A-Za-z0-9]*\).*/\1/p" | sed -n "\$p" | tr A-Z a-z; }
+val(){ [ -f "$OPT" ] && tr -d '\r' < $OPT | grep -v '^[[:space:]]*#' | sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\([A-Za-z0-9_-]*\).*/\1/p" | sed -n "\$p" | tr A-Z a-z | sed 's/_/-/g'; }
 [ "$CMD" = get ] && { OPT=${3:-/mnt/ubi_boot/oppo-dv-mkv/options.txt}; val "$2"; exit 0; }   # an option's value (dvmkv.sh)
 # 25p/30p: name Source-Direct-block-fp VA:bytes:original:patched
 L25="
@@ -44,7 +45,8 @@ CN 0x122a1e8:24:2c48a82bd5b956c17a9ad85a9e07e299 0x12321ee:8:5000500050005000   
 TW 0x122a1e8:24:e0f65555c5458a5ffe5b7cd772f1755b 0x12321ee:8:e6017e007e005000   # TW
 JP 0x122b1e8:24:0c37f19ce7fa8c98a69e6df71b788051 0x123b1ee:8:cf00cf00cf00cf00   # JP
 US 0x122b1e8:24:9beb939de59b16a1b541a6caee077615 0x123b1ee:8:7e007e007e00e401   # US"
-LANGS="en:7e00 de:6d00 fr:8d00 es:9301 it:cc00 sv:9e01 nl:7600 pl:5c01 zh:5000 ja:cf00 ru:6c01"
+# language codes (as in the menu language list of every program: 0x1e6 = Traditional Chinese, menus only)
+LANGS="en:7e00 de:6d00 fr:8d00 es:9301 it:cc00 sv:9e01 nl:7600 pl:5c01 zh:5000 zh-tw:e601 ja:cf00 ru:6c01"
 P=${OPPODV_PID:-$(ps 2>/dev/null | awk '$4 ~ /(^|\/)bdpprog\.1$/{print $1; exit}')}; [ -n "$P" ] || { echo "player not running"; exit 1; }
 X=$PROC/$P/exe; M=$PROC/$P/mem
 fp(){ o=${1%%:*}; r=${1#*:}; [ "$(dd if=$X bs=1 skip=$((o)) count=${r%%:*} 2>/dev/null | md5sum | cut -d' ' -f1)" = ${r#*:} ]; }
@@ -67,11 +69,13 @@ cur(){ for c in 3 4 5; do
     [ -n "$ok" ] && { echo $c; return; }; done; echo unexpected; }
 # put COL: write column COL (3 original, 4 patched, 5 patched 50 Hz) of every site
 put(){ for e in $SITES; do wr ${e%%:*} "$(esc $(col $e $1))"; done; }
-# languages: the 8 bytes for a code (subtitle Auto 0x1e4 except where the region programs use the language itself)
-lbytes(){ for e in $LANGS; do [ ${e%%:*} = $1 ] || continue; c=${e#*:}; case $1 in zh|ja|ru) s=$c;; *) s=e401;; esac; echo $c$c$c$s; return 0; done; return 1; }
+# languages: the 8 bytes for a code (subtitle Auto 0x1e4 except where the region programs use the language itself;
+# zh-tw = the TW program's own set: Traditional Chinese menus, English disc menu and audio, Chinese subtitles)
+lbytes(){ for e in $LANGS; do [ ${e%%:*} = $1 ] || continue; c=${e#*:}
+    case $1 in zh|ja|ru) echo $c$c$c$c;; zh-tw) echo ${c}7e007e005000;; *) echo $c$c${c}e401;; esac; return 0; done; return 1; }
 lname(){ v=$1; o=; for k in 0 4 8 12; do h=$(echo $v | cut -c$((k + 1))-$((k + 4))); n=$h
-  for e in $LANGS; do [ ${e#*:} = $h ] && n=${e%%:*}; done; [ $h = e401 ] && n=auto; [ $h = e601 ] && n=zh-tw; o="$o${o:+/}$n"; done; echo $o; }
-lknown(){ v=$1; for k in 0 4 8 12; do h=$(echo $v | cut -c$((k + 1))-$((k + 4))); case " $LANGS e401 e601 " in *:$h\ *|*\ $h\ *) ;; *) return 1;; esac; done; }
+  for e in $LANGS; do [ ${e#*:} = $h ] && n=${e%%:*}; done; [ $h = e401 ] && n=auto; o="$o${o:+/}$n"; done; echo $o; }
+lknown(){ v=$1; for k in 0 4 8 12; do h=$(echo $v | cut -c$((k + 1))-$((k + 4))); case " $LANGS e401 " in *:$h\ *|*\ $h\ *) ;; *) return 1;; esac; done; }
 
 r25(){ lay "$L25" 1; [ -n "$LAY" ] || { echo "25p/30p: not supported on this player program"; return; }
   s=$(cur); want=$(val native_25p)

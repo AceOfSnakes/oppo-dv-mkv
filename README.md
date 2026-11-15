@@ -271,7 +271,7 @@ default_language = en
 |---|---|---|
 | `native_25p` | `on`, `off` | HD files at 25, 29.97 or 30 frames/s play at that rate instead of 50 / 60 Hz |
 | `menu_refresh` | `60`, `50`, `stock` | refresh rate of the home menu and screen saver |
-| `default_language` | `en de fr es it sv nl pl zh ja ru`, `stock` | the languages a factory reset sets |
+| `default_language` | `en de fr es it sv nl pl zh zh-tw ja ru`, `stock` | the languages a factory reset sets |
 
 ### `native_25p`: 25 and 30 frames/s at their own rate
 
@@ -309,8 +309,9 @@ supported on this player program").
 **Setup > Device Setup > Reset Factory Defaults** puts the player's menus, the disc menu language and the audio
 language back to the firmware's own: Russian on the RU firmware many jailbroken players run. With
 `default_language = en` (or one of the other codes) a reset sets that language instead, and subtitles to Auto (to the
-same language for `zh`, `ja` and `ru`, as the regional firmware does). Your current settings are not changed by
-installing; the option only changes what the next reset writes.
+same language for `zh`, `ja` and `ru`, as the regional firmware does). `zh` gives Simplified Chinese menus;
+`zh-tw` gives Traditional Chinese menus with English disc menus and audio and Chinese subtitles, as the TW firmware
+does. Your current settings are not changed by installing; the option only changes what the next reset writes.
 
 ## Factory menu
 
@@ -1384,6 +1385,8 @@ TV's input status (the C1 now and then reports 2160p25 as 24 Hz; the player's lo
 - `menu_refresh = 60`: home menu at 2160p60 (Auto) and 1080p60 (Source Direct) right after power-on and after 24,
   25 and 50 Hz films; three cold boots.
 - `default_language`: the four defaults read back as set (`en/en/en/auto`). A real factory reset was **not** run.
+  `zh-tw` (next release): read back as `zh-tw/en/en/zh` on the player and on a copy of every program's memory;
+  `zh_tw` and `zh-TW` are read the same way, an unknown code keeps the firmware's own.
 - Offline: the option tables for the eleven player programs we hold, applied to a copy of each program's memory and
   taken off again (byte-identical afterwards); the re-ordered branches disassembled; a program changed inside a
   patched block is refused.
@@ -1558,6 +1561,11 @@ requests.
 </p>
 
 ## Changelog
+
+- **Next release (not numbered yet).**
+  - **`default_language = zh-tw`:** a factory reset sets Traditional Chinese menus, English disc menus and audio and
+    Chinese subtitles, as the TW firmware does. `zh` stays Simplified Chinese. In v2.0.2-beta `zh-tw` was read as
+    `zh`. See [Video options](#default_language-what-a-factory-reset-sets).
 
 - **v2.0.2-beta: video options (25 / 30 frames/s at their own rate, 60 Hz menu, reset language); subtitle
   timing.** A beta: tested on one player (RU) and one TV (LG C1). A new file on the stick,
