@@ -20,6 +20,11 @@ Since v2.0.2 (beta): video options (all off unless you turn them on): edit oppo-
 installing. native_25p = on: HD MKV/MP4 files at 25 or 30 frames/s play at 25 / 30 Hz instead of 50 / 60 Hz
 (interlaced 1080i files are recognised and play as before). menu_refresh = 60: home menu at 60 Hz on RU, EU and AU
 firmware. default_language = en: the language a factory reset sets. See "Video options" in the README on GitHub.
+Since v2.1.0 (beta): Blu-ray / UHD / DVD disc images (ISO) and disc folders (BDMV, VIDEO_TS on a WebDAV server)
+play over DLNA, pushed from a phone/tablet app or picked in Network > DLNA server, with their disc menus (part of the
+Dolby Vision MKV fix; RU and USA jailbreak, jb_overlay; dlna_iso = off turns it off). After every boot the player
+shows for 10 s "oppo-dv-mkv <version>: all patches loaded", or names the parts that did NOT load (boot_message = off
+hides the first). default_language = zh-tw: Traditional Chinese menus after a factory reset.
 
 Also: better subtitles (anti-aliased, thicker outline with black, grey colours for HDR/DV) and a factory menu
 shortcut (Setup > Playback Setup, cursor on Gapless Playback, press 0 0 0 0), for the player programs of every

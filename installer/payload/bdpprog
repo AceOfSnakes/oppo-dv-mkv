@@ -11,6 +11,8 @@
 #    player exits normally: switched off, restarted or updated) -> no patches for one boot, then they are tried again
 #    (two boots cut short, e.g. by unplugging within 90 s, must not disable them for good)
 #  - player dies abnormally within 120 s of a patched start     -> create $D/disable and reboot
+# On the boot without patches the screen says so (bootmsg.sh: the player's own popup, the only RAM patch then; a crash
+# of that boot counts as a patched start too).
 D=${OPPODV_D:-/mnt/ubi_boot/oppo-dv-mkv}
 PLAYER=${OPPODV_PLAYER:-/usr/local/bin/bdpprog.1}
 PREV=${OPPODV_PREV:-/mnt/ubi_boot/bdpprog.prev}
@@ -24,6 +26,9 @@ if [ ! -e $D/disable ]; then
   if [ "$N" -ge 2 ]; then
     echo "boot $(date) bootcount=$N -> patches skipped for this boot" >> $D/wrapper.log
     rm -f $D/bootcount; sync
+    if [ -f $D/bootmsg.sh ] && [ -z "$OPPODV_D" ]; then
+      MODS=2; sh $D/bootmsg.sh show "oppo-dv-mkv: patches skipped for this boot (fail-safe)" 10000 >> $D/wrapper.log 2>&1 &
+    fi
   else
     echo $((N+1)) > $D/bootcount; sync
     MODS=1
@@ -46,7 +51,7 @@ RC=$?
 T1=$(cut -d. -f1 /proc/uptime)
 case "$RC" in
   0|2|3|4|5|6|7|9|11) [ $MODS = 1 ] && rm -f $D/bootcount && sync;;   # a normal exit: this boot did not hang
-  *) if [ $MODS = 1 ] && [ $((T1-T0)) -lt 120 ]; then
+  *) if [ $MODS != 0 ] && [ $((T1-T0)) -lt 120 ]; then
        touch $D/disable
        echo "boot $(date) player rc=$RC after $((T1-T0))s -> patches disabled, rebooting" >> $D/wrapper.log
        sync; exit 6
