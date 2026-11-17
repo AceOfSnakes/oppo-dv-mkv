@@ -21,7 +21,7 @@ typedef unsigned char u8; typedef unsigned short u16; typedef unsigned int u32; 
 #define CAVE5 __attribute__((section(".text.cave5"), noinline))   /* progressive/interlaced: in vMPCTestDvdRwdThr (link.ld) */
 #include "iso639.h"
 
-#define ST_VA       0x757e80u   /* RW bss slack after dvhook's state (0x757e00..0x757e44) */
+#define ST_VA       0x757e80u   /* RW bss slack after dvhook's state (0x757e00..0x757e4c) */
 #define VA_READ     0x40caecu   /* CLpMp4Parser::mrAsyncTxData2Buf(u64 file pos, u8 *buf, u64 len), 0 = ok (synchronous) */
 #define P_BOXPOS    0xb898      /* parser: u64 file position of the box being handled, + 4 (the walker reads from -4) */
 #define P_TRACKID   0xb710      /* parser: track_ID of the trak being parsed (tkhd) */

@@ -2,6 +2,20 @@
 #
 # Change a value, keep this file next to the AutoScript folder on the USB stick and run the installer again. Running
 # the installer without this file keeps the options already installed. "stock" (or no value) = the player's own way.
+# The same options can be changed on the player: Setup > Extras (the page writes this file on the player; a copy on
+# the stick replaces them at the next install).
+#
+# dv_mkv = on | off
+#   Dolby Vision from MKV files (profile 5 and 8 single layer, profile 7 with BL and EL in one track). off = the
+#   player's own way: such files play as HDR10 / SDR (profile 5 has no HDR10 base: wrong colours). Everything else
+#   (MP4 subtitles and languages, the profile 7 and TV-led metadata fixes) stays. From Setup > Extras: at once.
+dv_mkv = on
+#
+# dv_l5 = on | off
+#   TV-led Dolby Vision: the active area (L5 metadata) goes to the TV, rewritten for the frame the player outputs and
+#   widened for what it draws in the bars. off = Oppo's way: no L5 (the TV then also ignores positive lift); the other
+#   metadata fixes stay. From Setup > Extras: at once.
+dv_l5 = on
 #
 # native_25p = on | off
 #   HD video (MKV and MP4, H.264 or HEVC, 720 lines and up) at 25, 29.97 or 30 frames per second plays at that rate:
@@ -38,3 +52,8 @@ boot_message = on
 #   pushed from a phone or tablet app, or picked in Network > DLNA server. Needs the Dolby Vision MKV fix and the
 #   jailbreak's ISO player (RU and USA jailbreak, jb_overlay). off = the player's own DLNA playback only.
 dlna_iso = on
+#
+# setup_extras = on | off
+#   The "Extras" page in the player's Setup menu (between Network Setup and Exit) to change these options on the
+#   player. off = Oppo's Setup menu as it is. RU 65-0131 player program and its jailbreak copies only.
+setup_extras = on

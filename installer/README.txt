@@ -25,6 +25,11 @@ play over DLNA, pushed from a phone/tablet app or picked in Network > DLNA serve
 Dolby Vision MKV fix; RU and USA jailbreak, jb_overlay; dlna_iso = off turns it off). After every boot the player
 shows for 10 s "oppo-dv-mkv <version>: all patches loaded", or names the parts that did NOT load (boot_message = off
 hides the first). default_language = zh-tw: Traditional Chinese menus after a factory reset.
+Since v2.1.2 (beta): Setup > Extras, a new page in the player's own Setup menu (between Network Setup and Exit),
+changes the options on the player: Dolby Vision MKV and L5 at once, the others after the next power-on (English only
+for now; RU 65-0131 program family). New options: dv_mkv = off (no Dolby Vision from MKV, the player's own way),
+dv_l5 = off (no L5 to the TV, Oppo's way), setup_extras = off (no Extras page). Installing with
+oppo-dv-mkv-options.txt on the stick replaces what was set on the player; delete it from the stick to keep that.
 
 Also: better subtitles (anti-aliased, thicker outline with black, grey colours for HDR/DV) and a factory menu
 shortcut (Setup > Playback Setup, cursor on Gapless Playback, press 0 0 0 0), for the player programs of every

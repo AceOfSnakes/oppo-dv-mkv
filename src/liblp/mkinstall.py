@@ -5,7 +5,7 @@
 #   mp4/build/mp4b.bin  MP4 moov pre-scan (language list), over vMPCTestDvdRwdSpeedThr (MPC self-test code)
 #   mp4/build/mp4c.bin  subtitle fixes: MKV VobSub palette on a switch, MP4 VobSub frame size, over vMPCTestOperation1
 #   mp4/build/mp4d.bin  progressive/interlaced from the H.264 / HEVC headers (MKV, MP4), over vMPCTestDvdRwdThr
-# dvhook.sh on|off|status|hvcc on|off|scan on|off|langs CODE... Checks liblp's md5 and every site's original contents, and verifies the written blobs.
+# dvhook.sh on|off|status|hvcc on|off|scan on|off|dv on|off|dvaddr|langs CODE... Checks liblp's md5 and every site's original contents, and verifies the written blobs.
 import os, struct, subprocess
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 def load(stem):
@@ -24,9 +24,10 @@ def bl(src, dst, op=0xeb000000):
     assert -(1 << 23) <= off < (1 << 23)
     return struct.pack('<I', op | (off & 0xffffff))
 B_AL = 0xea000000
-CAVE, ST, STLEN = 0x6cdc00, 0x757e00, 0x48
+CAVE, ST, STLEN = 0x6cdc00, 0x757e00, 0x4c
 HVCC = 0x40   # struct st .hvcc
 SCANON = 0x42 # struct st .scanon
+DVOFF = 0x48  # struct st .dvoff
 CAVE2, CAVE2_LEN = 0x5402fc, 0xae8                       # vMPCTestOperation4
 CAVE2_ORIG = 'f04f2de914d04de2cc899fe5cc399fe5'          # its first 16 bytes in liblp e39b358c
 CAVE3, CAVE3_LEN = 0x530de8, 0x9e4                       # vMPCTestDvdRwdSpeedThr
@@ -105,9 +106,10 @@ out = f'''#!/bin/sh
 # oppo-dv-mkv: Dolby Vision from MKV (P5/P8 single layer, P7 BL+EL single track; dvcC/dvvC-detected) and from MP4
 # with a dvvC box (profile 8); MP4 audio/subtitle languages and tx3g text subtitles; MKV VobSub palette fixes -
 # RAM patch for liblp.so.
-# usage: on|off|status|langs CODE...|hvcc on|off|scan on|off  (langs: MP4 audio/subtitle language list; hvcc: DV also for
-# MKVs whose hvcC has no VPS/SPS/PPS, only once hvccfix.sh is on; scan: tell the player which MKV/MP4 videos are
-# progressive, so HD 25/29.97/30 frames/s is not taken for interlaced - the native_25p option)
+# usage: on|off|status|langs CODE...|hvcc on|off|scan on|off|dv on|off  (langs: MP4 audio/subtitle language list; hvcc: DV
+# also for MKVs whose hvcC has no VPS/SPS/PPS, only once hvccfix.sh is on; scan: tell the player which MKV/MP4 videos are
+# progressive, so HD 25/29.97/30 frames/s is not taken for interlaced - the native_25p option; dv off: no Dolby Vision
+# from MKV, the player's own way, everything else stays - the dv_mkv option)
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin
 LIB_MD5=e39b358c5b0948933f49fd3099f81114
 [ "$(md5sum /usr/local/lib/liblp.so | cut -d' ' -f1)" = $LIB_MD5 ] || {{ echo "liblp md5 mismatch"; exit 1; }}
@@ -173,6 +175,14 @@ scan)
   case "$2" in on) v='\\x01';; off) v='\\x00';; *) echo "usage: scan on|off"; exit 1;; esac
   printf "$v" | dd of=$M bs=1 seek=$((B + {ST + SCANON:#x})) conv=notrunc 2>/dev/null
   echo "progressive video: $([ "$(rd $((B + {ST + SCANON:#x})) 1)" = 01 ] && echo "told to the player" || echo "not told (stock)")";;
+dv)
+  [ "$(state)" = ok ] || {{ echo "dvhook is not on"; exit 1; }}
+  case "$2" in on) v='\\x00';; off) v='\\x01';; *) echo "usage: dv on|off"; exit 1;; esac
+  printf "$v" | dd of=$M bs=1 seek=$((B + {ST + DVOFF:#x})) conv=notrunc 2>/dev/null
+  echo "Dolby Vision from MKV: $([ "$(rd $((B + {ST + DVOFF:#x})) 1)" = 01 ] && echo "off (stock)" || echo on)";;
+dvaddr)  # where the dv flag byte is (for the Setup page, which switches it at once), when the patch is on
+  [ "$(state)" = ok ] || {{ echo "dvhook is not on"; exit 1; }}
+  echo $((B + {ST + DVOFF:#x})); exit 0;;
 langs)   # MP4 language list: up to 8 codes (2 or 3 letters); none = clear
   [ "$(state)" = ok ] || {{ echo "dvhook is not on"; exit 1; }}
   shift; v=; k=0

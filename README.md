@@ -23,6 +23,9 @@ folders play over DLNA, pushed from a phone or tablet app or picked in the playe
 menus. And after every boot the player says on screen whether all patches loaded. See
 [DLNA disc images](#dlna-disc-images-v210) and [Boot message](#boot-message-v210).
 
+**Plus the options on the player (v2.1.2):** a new **Extras** page in the player's own Setup menu changes the
+options without a USB stick (English only for now). See [Setup > Extras page](#setup--extras-page-v212).
+
 ---
 
 > ## ⚠️ DISCLAIMER: READ THIS FIRST
@@ -57,6 +60,7 @@ menus. And after every boot the player says on screen whether all patches loaded
 - [Better subtitles](#better-subtitles)
 - [MP4 files (v1.8.0)](#mp4-files-v180)
 - [Video options (v2.0.2)](#video-options)
+- [Setup > Extras page (v2.1.2)](#setup--extras-page-v212)
 - [DLNA disc images (v2.1.0)](#dlna-disc-images-v210)
 - [Boot message (v2.1.0)](#boot-message-v210)
 - [Factory menu](#factory-menu)
@@ -267,23 +271,30 @@ Settings that Oppo's Setup menu does not have, in a text file, **`oppo-dv-mkv-op
 install zip next to the `AutoScript` folder. The three video options are part of the Dolby Vision MKV fix and ship
 **off** (`stock`): nothing about the picture changes until you edit the file. To change one, edit the file on the USB
 stick and run the installer again (see [Install](#install)); running the installer without the file keeps what is
-installed.
+installed. Since v2.1.2 most of them can also be changed on the player, in
+[Setup > Extras](#setup--extras-page-v212), which writes the installed copy of the file.
 
 ```
+dv_mkv = on
+dv_l5 = on
 native_25p = on
 menu_refresh = 60
 default_language = en
 boot_message = on
 dlna_iso = on
+setup_extras = on
 ```
 
 | Option | Values | What it does |
 |---|---|---|
+| `dv_mkv` | `on` (shipped), `off` | Dolby Vision from MKV files. `off`: the player's own way (HDR10 / SDR); everything else stays (v2.1.2) |
+| `dv_l5` | `on` (shipped), `off` | TV-led Dolby Vision: the active area (L5) goes to the TV, see [fix 24](#24-tv-led-dolby-vision-metadata-lost-on-the-way-to-the-tv-cm-29-and-cm-40-v200). `off`: Oppo's way, no L5; the other metadata fixes stay (v2.1.2) |
 | `native_25p` | `on`, `off` | HD files at 25, 29.97 or 30 frames/s play at that rate instead of 50 / 60 Hz |
 | `menu_refresh` | `60`, `50`, `stock` | refresh rate of the home menu and screen saver |
 | `default_language` | `en de fr es it sv nl pl zh zh-tw ja ru`, `stock` | the languages a factory reset sets |
 | `boot_message` | `on` (shipped), `off` | the "all patches loaded" message after each boot, see [Boot message](#boot-message-v210) |
 | `dlna_iso` | `on` (shipped), `off` | disc images over DLNA, see [DLNA disc images](#dlna-disc-images-v210) |
+| `setup_extras` | `on` (shipped), `off` | the Extras page in the Setup menu, see [Setup > Extras page](#setup--extras-page-v212) (v2.1.2) |
 
 ### `native_25p`: 25 and 30 frames/s at their own rate
 
@@ -325,6 +336,42 @@ same language for `zh`, `ja` and `ru`, as the regional firmware does). `zh` give
 `zh-tw` gives Traditional Chinese menus with English disc menus and audio and Chinese subtitles, as the TW firmware
 does. Your current settings are not changed by installing; the option only changes what the next reset writes.
 
+## Setup > Extras page (v2.1.2)
+
+The [options](#video-options) can be changed on the player: **Setup > Extras**, a new category between Network
+Setup and Exit, works like Oppo's own pages. OK (or right) enters the page, OK on a row opens its list (the dot marks
+the current value), OK on a value saves it, left goes back.
+
+![The Extras page in the player's Setup menu](docs/images/setup-extras.png)
+
+| Row | Option | Takes effect |
+|---|---|---|
+| Dolby Vision MKV | `dv_mkv` | at once, for the next file started |
+| Dolby Vision L5 | `dv_l5` | at once |
+| Native 25p / 30p | `native_25p` | after the next power-on |
+| Home Menu Refresh | `menu_refresh` | after the next power-on |
+| Reset Language | `default_language` | after the next power-on (and only for a factory reset, as before) |
+| Boot Message | `boot_message` | after the next power-on |
+| DLNA Disc Images | `dlna_iso` | after the next power-on |
+
+A change is written to the installed options file (`/mnt/ubi_boot/oppo-dv-mkv/options.txt`) at once; comments and
+other lines in it stay. The help line at the bottom says what each row does; on the Extras row itself it shows the
+installed version. Installing again **with** `oppo-dv-mkv-options.txt` on the stick replaces the options with the
+file's; delete the file from the stick to keep what you set on the player.
+
+**English only for now.** The page's own texts (the category name, the rows, the help lines, values such as "60 Hz")
+are in English whatever menu language the player is set to; only On and Off come from Oppo's own translated texts.
+Translations may follow in a later version.
+
+**Needs** the Dolby Vision MKV fix and the RU 65-0131 player program family (RU and USA jailbreak, jb_overlay V3,
+rebranded clones), like the [boot message](#boot-message-v210). On other programs the installer leaves it out and
+says `Setup page: not supported on this player program`; the options file works as before. `setup_extras = off`
+hides the page.
+
+**How:** in memory only, like every other patch: at boot the page's code is put into an unused gap of the running
+player program, and the Setup app itself adds the row and builds the page with the player's own menu widgets,
+texts and callbacks. Nothing in the firmware is changed. Details: [docs/TECHNICAL.md](docs/TECHNICAL.md), Part 8.
+
 ## DLNA disc images (v2.1.0)
 
 The jailbroken Oppo plays disc images (ISO) from a USB disk or a network share with the jailbreak's ISO player,
@@ -364,7 +411,7 @@ its own popup (the bar Oppo uses for "Zoom is not available for Dolby Vision con
 
 | Message | Meaning |
 |---|---|
-| `oppo-dv-mkv v2.1.1-beta: all patches loaded` | every installed part loaded. `boot_message = off` hides it |
+| `oppo-dv-mkv v2.1.2-beta: all patches loaded` | every installed part loaded. `boot_message = off` hides it |
 | `oppo-dv-mkv: NOT loaded: DV metadata, hvcC (see dvmkv.log)` | the named parts did not load; their lines in `/mnt/ubi_boot/oppo-dv-mkv/dvmkv.log` say why. Shown also with `boot_message = off` |
 | `oppo-dv-mkv: patches skipped for this boot (fail-safe)` | the [fail-safe](#uninstall-and-emergency-off-switch) skipped the patches after two boots that were cut short; the next boot tries them again |
 
@@ -617,11 +664,9 @@ are not.
     graphic occupies are lifted with the picture, across the full width, for as long as it is shown. The rest of
     the bars stays black and the picture itself never changes. Subtitles that sit inside the picture cause nothing.
   - Subtitles and menus in the bars were checked with text subtitles (also moved down into the bar), PGS (alone and
-    next to other subtitle formats), the subtitles of a UHD Blu-ray image, the info bar and the option menu.
-    VobSub is handled by the same code but was not looked at in a Dolby Vision file.
-  - **The disc's own graphics in the bars** (a Blu-ray's pause bar or pop-up menu, drawn by the disc's Java program)
-    are blanked by the TV there; the part inside the picture shows. The patch cannot read that graphics layer yet.
-    The player's own menus and the disc's subtitles are not affected.
+    next to other subtitle formats), the subtitles, pause bar and pop-up menu of a UHD Blu-ray image, the info bar
+    and the option menu, during playback and while paused. VobSub is handled by the same code but was not looked at
+    in a Dolby Vision file.
   - Output resolutions other than 1920x1080 and 3840x2160: the active area is sent without the widening.
   - L10 (CM 4.0 target display) is passed on, but no test file had it.
   - Player-led (LLDV) mode is not changed: there the player does the mapping, with its CM 2.9 code.
@@ -1098,7 +1143,12 @@ of the same metadata packet that the driver never reads.
   player draws there. The patch looks at what the player's graphics planes show outside the area, at every frame,
   and widens the area to take that in, only on the side and only as far as needed. L5 is always sent, so the
   picture does not change when a subtitle appears (see [limitations](#known-limitations) for the one visible
-  side effect).
+  side effect). Since v2.1.2 this includes a disc's own graphics (the pause bar and pop-up menus a Blu-ray's Java
+  program draws, kept in memory the driver maps separately) and graphics shown while paused: the player handles
+  the metadata only when a new frame comes, so during a pause the patch checks at every vertical sync and hands
+  the metadata to the HDMI side again when something appears in the bars or goes. While the player's screen saver
+  is up (the moving logo on black) L5 is left out altogether, so the TV neither blanks around the logo nor lifts a
+  rectangle of black that follows it; it comes back when the screen saver goes.
 
 The patched code is at the same place in every firmware we have a dump of (RU, USA, a third build, Cambridge
 CXUHD); `dvcm.sh` reads the six data addresses it needs from the driver on the player and checks everything it
@@ -1496,6 +1546,17 @@ the RU player and the LG C1; each disc started from the app and stopped from the
 | Installer, offline: every earlier scenario plus the new parts (RU, jb_overlay, USA jailbreak, CXUHD, updates from v1.4.0 to v2.0.0-beta and back) | 96 of 96 steps pass; on the CXUHD both new parts are left out with the reason |
 | Installed with the release installer on the RU player, two power cycles | `message: shown` at 36 s both times, every part loaded; afterwards bar and icon back, `usleep` import back to libc; the same build shown again on the home menu and captured |
 
+### Setup > Extras page (v2.1.2)
+
+| Test | Result |
+|---|---|
+| Category list (screen grabs on the LG C1) | Extras between Network Setup and Exit, all 8 rows inside the taller box; up / down wrap from Exit to Playback Setup and back; the help line and the arrow / OK hints as on Oppo's rows |
+| OK on Extras, compared with Playback Setup | the same: highlight bar on the first row, frame around the whole page, line under the category; up / down wrap inside the page; left back with the category box |
+| Option lists, compared with Auto Play Mode | the same: highlight on the first value, dot on the current one; OK saves, left leaves without a change |
+| Values | Boot Message off and on again: `options.txt` rewritten with the other lines kept; Dolby Vision MKV and L5 off and on: switched at once in the running patches |
+| Boot | the page in place about 30 s after power-on (two boots with the final build); `all patches loaded` |
+| Installer, offline | 96 of 96 steps pass; the page is installed only on the RU 65-0131 program family |
+
 ### Extras (v1.7.1)
 
 | Test | Result |
@@ -1603,10 +1664,11 @@ program if that file exists. The installer puts there:
                                       file with it, built at install time, swapped into /res at boot
 /mnt/ubi_boot/oppo-dv-mkv/fpage.sh    factory menu shortcut (one layout per regional v65 player program; on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/vidopt.sh   video options in the player program (apply|off|status|check|get)
-/mnt/ubi_boot/oppo-dv-mkv/options.txt oppo-dv-mkv-options.txt from the stick (video options, boot_message, dlna_iso)
+/mnt/ubi_boot/oppo-dv-mkv/options.txt oppo-dv-mkv-options.txt from the stick (all options); Setup > Extras writes it
 /mnt/ubi_boot/oppo-dv-mkv/bootmsg.sh, bootmsg.bin  boot message in the player's own popup (show TEXT [MS]|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/dlnaiso, dlnaiso.sh, dmrhook.sh, dmrhook.bin  DLNA disc images: local NFS server, its helper,
                                       player hook (on|off|status|check)
+/mnt/ubi_boot/oppo-dv-mkv/xtmenu.sh, xtload.bin, xtmenu.bin  Setup > Extras page (on [VERSION]|status|check)
 /mnt/ubi_boot/oppo-dv-mkv-extras/     optional add-ons by other authors, started at boot (see Extras; not installed by oppo-dv-mkv)
 ```
 
@@ -1671,6 +1733,31 @@ requests.
 </p>
 
 ## Changelog
+
+- **v2.1.2-beta: the options on the player (Setup > Extras).** A new category, **Extras**, in the player's own Setup
+  menu (between Network Setup and Exit) changes the options without a USB stick: Dolby Vision MKV, Dolby Vision L5,
+  Native 25p / 30p, Home Menu Refresh, Reset Language, Boot Message and DLNA Disc Images. The two Dolby Vision rows
+  take effect at once, the others after the next power-on. English only for now. RU 65-0131 player program family,
+  like the boot message. See [Setup > Extras page](#setup--extras-page-v212). Three new options:
+  - `dv_mkv = off`: no Dolby Vision from MKV files (the player's own way); everything else stays.
+  - `dv_l5 = off`: no active area (L5) to the TV in TV-led Dolby Vision (Oppo's way); the other metadata fixes stay.
+  - `setup_extras = off`: no Extras page.
+
+- **Also in v2.1.2-beta: disc menus and everything shown while paused, blanked in the black bars in TV-led Dolby Vision
+  (since v2.0.0-beta).** Two more cases for
+  [fix 24](#24-tv-led-dolby-vision-metadata-lost-on-the-way-to-the-tv-cm-29-and-cm-40-v200), where the TV blanks the
+  bars over what the player draws there unless the active area sent with the picture is widened:
+  - **A Blu-ray's own graphics** (its pause bar, pop-up menus, anything its Java program draws) were missing in the
+    bars, while the part inside the picture showed. They are in memory the patch could not read; it now reads it.
+  - **While paused**, the active area was not updated at all, because the player only handles the metadata for a
+    new frame: the player's pause icon and info bar, opened during a pause, were blanked in the bars too, for files
+    and discs. The patch now checks at every vertical sync while paused and sends the area again when it changes.
+    While the player's screen saver is up, the active area is left out altogether: the logo moves freely and no
+    lifted rectangle follows it.
+  Checked on the LG C1 with a UHD Blu-ray image and Dolby Vision MKVs: the disc's pause bar and pop-up menu, the
+  pause icon and the info bar show in full; when they go, the bars are blanked again. No measurable CPU load. TVs
+  that do not blank outside the active area were not affected. Updating replaces `dvcm.sh`, `dvhook.sh` and
+  `dvmkv.sh` (the two new switches) and adds the Setup page's files; the other parts are unchanged.
 
 - **v2.1.1-beta: subtitles in the black bars blanked in TV-led Dolby Vision (since v2.0.0-beta).** A fix for
   [fix 24](#24-tv-led-dolby-vision-metadata-lost-on-the-way-to-the-tv-cm-29-and-cm-40-v200): PGS subtitles in an MKV
