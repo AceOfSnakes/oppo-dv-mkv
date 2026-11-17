@@ -1,4 +1,4 @@
-# oppo-dv-mkv: video options
+# oppo-dv-mkv: options
 #
 # Change a value, keep this file next to the AutoScript folder on the USB stick and run the installer again. Running
 # the installer without this file keeps the options already installed. "stock" (or no value) = the player's own way.
@@ -18,8 +18,23 @@ native_25p = off
 #   US, JP, CN and TW firmware already use 60 Hz; there this option does nothing.
 menu_refresh = stock
 #
-# default_language = en | de | fr | es | it | sv | nl | pl | zh | ja | ru | stock
+# default_language = en | de | fr | es | it | sv | nl | pl | zh | zh-tw | ja | ru | stock
 #   The language that Setup > Device Setup > Reset Factory Defaults sets for the player's menus, disc menus and
 #   audio (subtitles: Auto, or the same language for zh, ja, ru). Your current settings are not changed.
+#   zh = Simplified Chinese menus. zh-tw = Traditional Chinese menus, English disc menus and audio, Chinese
+#   subtitles (what the TW firmware sets).
 #   stock: the firmware's own (Russian on RU firmware, English on US/EU/AU).
 default_language = stock
+#
+# boot_message = on | off
+#   After every boot the player shows for 10 seconds which oppo-dv-mkv patches loaded, in its own popup:
+#   "oppo-dv-mkv <version>: all patches loaded". off = no message when everything loaded. If a part did NOT load,
+#   the message names it, also with off ("oppo-dv-mkv: NOT loaded: ..."). After a boot on which the fail-safe skipped
+#   the patches it says so. RU 65-0131 player program and its jailbreak copies only (RU and USA jailbreak, jb_overlay).
+boot_message = on
+#
+# dlna_iso = on | off
+#   Blu-ray, UHD and DVD disc images (ISO) and disc folders (BDMV / VIDEO_TS on a WebDAV server) play over DLNA:
+#   pushed from a phone or tablet app, or picked in Network > DLNA server. Needs the Dolby Vision MKV fix and the
+#   jailbreak's ISO player (RU and USA jailbreak, jb_overlay). off = the player's own DLNA playback only.
+dlna_iso = on

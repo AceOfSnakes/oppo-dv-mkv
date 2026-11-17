@@ -1,0 +1,66 @@
+#!/bin/sh
+# oppo-dv-mkv: DLNA disc images - RAM patch of the running player program (dmrhook.bin + the sites below).
+# usage: sh dmrhook.sh on | off | status | check
+#  - 0x944484 (DLNA player start, used by renderer pushes AND the on-screen browser) -> cave 0x1c06000 (dmr_try):
+#    a disc image (MIME / extension / BDMV or VIDEO_TS link) is published by dlnaiso.sh and played through the
+#    jailbreak's ISO player from /mnt/dlnaiso
+#  - 0x946318 (renderer -> player actions: play/pause/stop/seek from the control point) -> dmc_try
+#  - 0xc04628 / 0xc04630: browser item classifier extensions ".mpe" / ".xvid" -> ".iso" / "blurayiso"
+#  - 0xc045cc / 0xc045d4: both slots return DLNA type 0x3b (browser tag and label ISO)
+#  - 0xc04fea / 0xc05110: name extension for type 0x3b (tbb entry -> the type 0x25 code, its ".xvid" -> ".iso")
+#  - 0x1c004ac: jailbreak browser hook "beq ISO branch" -> jb_isofix (/dlna/ paths take the normal route)
+# Only the RU 65-0131 player program with the jailbreak's ISO player (RU and USA jailbreak, jb_overlay V3, rebranded
+# clones): every function and site used is checked first (fingerprints of the program file), anything else is refused.
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin
+case "$0" in */*) D=${0%/*} ;; *) D=. ;; esac
+CMD=$1; PROC=${OPPODV_PROC:-/proc}; BLOB=$D/dmrhook.bin
+CAVE=$((0x1c06000)); CAVEN=$((0x1500))   # code + data of the hook (the boot message stub follows at 0x1c07800)
+# fingerprints (file offset:length:md5): PLT entries used, the player functions called, both hooked functions, the
+# browser classifier and name code, the jailbreak's play_by_index (browser) and ISO player entry
+FPS="0x286f8:8808:9b3337a8cdb76f046fc7376875e9b4c5 0x132920:64:968614b9c53106e6d15362c91408bdcf
+0x22fa0c:64:1baab91b8a1fdb1bb71712d388f9bc95 0x70c10c:64:a5fdd44eb751f536878d17f25b60a0c7
+0x7d600c:64:001ca7a74d46c3bfdb367473c175ffca 0x9085c4:64:ac289c11d17e4866e1277a6ccb1ec7db
+0xbfa00c:64:c83bd70d159120c47ab24eb64cddb96c 0xbfe7d4:64:84656a76d3f799415fcce0aee3ec1277
+0x93c484:64:51a06903e2242bd204b97154ff34ff7c 0x93e318:64:c139128098377003b473d285c6205689
+0xbfc500:3328:695a2d6bf7675af7ce094564f9e854bf 0x12783f4:284:425c0bdcbeb10feba182c6365b511618
+0x127ad78:64:57a15ce0c2447946948fc3053900b902"
+# sites: address:original:patched (hex bytes; the two jumps first)
+JUMP="0x944484:@ORIG@:@SITE@"
+JUMP2="0x946318:@ORIG2@:@SITE2@"
+LITS="0xc04628:@ORIG_MPE@:@LIT_MPE@ 0xc04630:@ORIG_XVID@:@LIT_XVID@ 0xc045cc:2324:3b24 0xc045d4:2524:3b24
+0xc04fea:72:49 0xc05110:@ORIG_XVID@:@LIT_NAME@ 0x1c004ac:@JB_ORIG@:@JB_SITE@"
+P=${OPPODV_PID:-$(ps | awk '$4 ~ /(^|\/)bdpprog\.1$/{print $1; exit}')}
+[ -n "$P" ] || { echo "player not running"; exit 1; }
+X=$PROC/$P/exe; M=$PROC/$P/mem
+fp(){ o=${1%%:*}; r=${1#*:}; [ "$(dd if=$X bs=1 skip=$((o)) count=${r%%:*} 2>/dev/null | md5sum | cut -d' ' -f1)" = ${r#*:} ]; }
+for f in $FPS; do fp $f || { echo "DLNA disc images: not supported on this player program"; exit 1; }; done
+rdh(){ dd if=$M bs=1 skip=$(($1)) count=$2 2>/dev/null | hexdump -v -e "$2/1 \"%02x\""; }
+wrh(){ printf "$(echo $2 | sed 's/../\\x&/g')" | dd of=$M bs=1 seek=$(($1)) conv=notrunc 2>/dev/null; }
+state(){ a=${1%%:*}; r=${1#*:}; o=${r%%:*}; n=${r#*:}; c=$(rdh $a $((${#o} / 2)))
+  if [ "$c" = "$n" ]; then echo on; elif [ "$c" = "$o" ]; then echo off; else echo bad; fi; }
+put(){ a=${1%%:*}; r=${1#*:}; o=${r%%:*}; n=${r#*:}
+  [ "$(state $1)" = $2 ] && return 0
+  if [ $2 = on ]; then wrh $a $n; else wrh $a $o; fi
+  [ "$(state $1)" = $2 ] || { echo "write failed at $a"; exit 1; }; }
+sites(){ for s in $JUMP $JUMP2 $LITS; do [ "$(state $s)" = bad ] && { echo "site ${s%%:*} has unexpected bytes: refusing"; exit 1; }; done; }
+N=$(wc -c < $BLOB); CODE=$(hexdump -v -e '/1 "%02x"' $BLOB)
+cave(){ c=$(rdh $CAVE $N); if [ "$c" = "$CODE" ]; then echo ours; elif [ -z "$(rdh $CAVE $CAVEN | tr -d 0)" ]; then echo free; else echo other; fi; }
+case "$CMD" in
+check) sites; [ -n "$(rdh $CAVE 4)" ] || { echo "no free place in this player program"; exit 1; }; echo "supported";;   # the place itself is checked by "on"
+on)
+  sites
+  case $(cave) in
+  ours) ;;
+  free) [ "$(state $JUMP)" = off ] && [ "$(state $JUMP2)" = off ] || { echo "jumps on but the cave is empty: refusing"; exit 1; }
+        dd if=$BLOB of=$M bs=1 seek=$CAVE conv=notrunc 2>/dev/null; [ $(cave) = ours ] || { echo "cave write failed"; exit 1; };;
+  *) echo "place 0x1c06000 in use by something else: refusing"; exit 1;;
+  esac
+  for s in $LITS; do put $s on; done
+  put $JUMP2 on; put $JUMP on
+  echo "on";;
+off) sites; put $JUMP off; put $JUMP2 off; for s in $LITS; do put $s off; done; echo "off";;
+status) r=; for s in $JUMP $JUMP2 $LITS; do r="$r $(state $s)"; done
+  case "$r" in *off*|*bad*) ;; *) echo on; exit 0;; esac
+  case "$r" in *on*|*bad*) echo "mixed:$r";; *) echo off;; esac;;
+*) echo "usage: dmrhook.sh on | off | status | check"; exit 2;;
+esac

@@ -1013,7 +1013,11 @@ already prefer 60 Hz: no layout, the option reports "not supported".
 
 **`default_language`.** Four halfwords in `.data` between the constants `01 02 01 01 02 00` and `01 01 "OPPO_PLA"`
 (`0x12321ee`): OSD, disc menu, audio and subtitle language, as indexes into the program's 10-byte ISO 639 table
-(`0x7e` English, `0x16c` Russian, `0x1e4` Auto). RU has `6c01` four times, EU/AU/US `7e00 7e00 7e00 e401`.
+(`0x7e` English, `0x16c` Russian, `0x50` Chinese, `0x1e4` Auto). RU has `6c01` four times, EU/AU/US `7e00 7e00 7e00 e401`,
+CN `5000` four times, TW `e601 7e00 7e00 5000`. `0x1e6` lies past the end of the ISO table (`0x1e4` entries): it is the
+Traditional Chinese entry of the menu language list (`2, 7e 6d 8d 193 cc 19e 76 15c 50 1e6 cf 16c 1e4` at `0x122670c`
+in the RU program; the same list in every program we hold, CXUHD without Polish), and is used for the OSD only.
+`zh-tw` writes the TW set.
 Setup > Reset Factory Defaults (`FUN_00888bb8`) resets the settings items from these at run time, so the RAM patch
 is what a reset reads. The reset the firmware does by itself at boot when its settings fail their check runs before
 the patch.
@@ -1022,6 +1026,96 @@ the patch.
 and the language words by their two neighbours; `mklayouts.py` writes the three tables (`L25`, `LHZ`, `LLANG`) into
 `vidopt.sh`, each line with a fingerprint of the block it patches. A site that holds neither the original nor one of
 our own values is reported as "unexpected" and nothing is written.
+
+## Part 6: boot message (`bootmsg.sh`, `bootmsg.bin`, v2.1.0)
+
+Addresses: the RU 65-0131 player program; its jailbreak copies (RU and USA jailbreak, jb_overlay V3, rebranded
+clones) have the same main code, and `bootmsg.sh` checks fingerprints of everything below before writing.
+
+**The popup.** `misc_view_dv_lock_tip_show_frame` (`FUN_0080cdcc`, Thumb) is the tip "Zoom is not available for
+Dolby Vision content.": case 4 builds the text with sprintf, converts it (`c_uc_ps_to_w2s`) and sets it on the text
+widget (`c_wgl_do_cmd(h, 0x400f1402 SETTEXT, w2s, len)`), moves the icon (`c_wgl_move`), then shows the frame for
+4 s with `0x00ac8344` (show with timeout, Thumb; hide callback `_misc_dv_lock_tip_ui_timeout_cb_wgl` `0x0080cd35`).
+When that fails (it does at the home menu: the frame is shown, but its timer is not registered) it uses its own
+timer instead: `x_timer_start(*0x01344a6c, ms, 1, 0x0080cd81, 0)`. The widgets, in the misc view's table at
+`0x01344c0c`:
+
+| Handle at | Widget | Created by | Rectangle (parent) |
+|---|---|---|---|
+| `0x01344c74` (+0x68) | `h_id_frame_dv_lock_info` | `FUN_00813cd0` | at 100,43 on the screen |
+| `0x01344c78` (+0x6c) | the red "not allowed" icon | `FUN_00813dd4` | moved by the tip to {1611, 18, 1700, 68} |
+| `0x01344c7c` (+0x70) | `h_id_frame_dv_lock_info_bg` (the bar) | `FUN_00813f88` | {200, 800, 1520, 920} |
+| `0x01344c80` (+0x74) | `h_id_text_dv_lock_info` | `FUN_008140ec` | {0, 0, 1320, 120} in the bar |
+
+Oppo's code shows this tip from several threads (playback key handlers, a timer thread), so the widget calls work
+outside the misc view's own thread.
+
+**Getting there.** A shell script cannot call into the player, and no idle code path of the player reads anything
+we control. `usleep` is a PLT import (`0x0003294c`, GOT slot `0x011d9224`) that the RS-232 thread
+(`FUN_007e3124`: `read` the port, `usleep(100000)`, forever; default pthread stack) and other threads call all the
+time. While a message is pending, `bootmsg.sh` points the GOT slot at `bm_usleep` in the stub; the first thread that
+comes through claims the request (`ldrex`/`strex`), runs the step and continues into the real `usleep`. The slot is
+written with one aligned 4-byte write and put back as soon as the message has been shown and reset.
+
+**The stub** (`src/bootmsg/bootmsg.c`, 560 bytes at `0x01c07800`, in the jailbreak's free tail of its RWX `.text1`
+segment, after the DLNA hook): a 160-byte header the script writes (magic `BMSG`, state, the original `usleep`,
+duration, results, bar position, 128-byte text), then the code.
+
+| State | Set by | Step |
+|---|---|---|
+| 1 -> 2 -> 3 | `bootmsg.sh show` | set the text, hide the icon (`c_wgl_set_visibility(icon, 2)`), move the bar to y 437 (the middle of a 1080-line screen), show the frame for the duration (stock timer fallback as above) |
+| 4 -> 5 -> 6 | `bootmsg.sh`, after the duration | bar back to {200, 800, 1520, 920}, icon visible again, so Oppo's own tip looks as before |
+
+`bootmsg.sh show` waits for the player and for the frame handle (the widgets exist), and until 25 s of uptime;
+`dvmkv.sh` runs it in the background at the end of the boot with "all patches loaded" or the parts that did not
+load; the boot wrapper runs it on the boot the fail-safe skips the patches. A part did not load when its script
+exits non-zero or prints a failure ("unexpected", "failed", "mismatch", ...); "not supported on this player program"
+of a video option is known at install time and does not count.
+
+Checked before anything is written (fingerprints of the program file): the tip function and both hide callbacks,
+the show-with-timeout helper, the bar's creation code (its rectangle is put back), the exported stubs used
+(`c_strlen`, `c_uc_ps_to_w2s`, `c_uc_w2s_strlen`, `c_wgl_do_cmd`, `c_wgl_move`, `c_wgl_set_visibility`,
+`x_timer_start`/`stop`) and the `usleep` PLT entry; the stub's place must be zero or hold this stub; the GOT slot
+must hold a resolved address.
+
+## Part 7: DLNA disc images (`dlnaiso`, `dlnaiso.sh`, `dmrhook.sh`, `dmrhook.bin`, v2.1.0)
+
+**Why a disc image showed a black screen over DLNA.** DLNA playback (renderer pushes and the browser) goes
+`bd_play_dlna_media_file` -> the plain stream player; it never reaches `bd_play_ISO_and_file`, the jailbreak's ISO
+player (`0x01c02d78`, `.text1`), which runs `losetup /dev/loop1 <path>`, `mount /dev/loop1 /mnt/iso` and plays
+`/mnt/iso` as a disc. That path only needs a file the kernel can open.
+
+**The server** (`src/dlnaiso/dlnaiso.c`, static ARM, musl): a read-only NFSv3 + MOUNT v3 server on
+127.0.0.1:20490 (no portmapper; `dlnaiso mount` passes port and mountport to the kernel's NFS client: `vers=3,
+tcp, soft, rsize=1M, nordirplus`). Every `/tmp/dlnaiso/<name>.url` is a file `<name>` in `/mnt/dlnaiso`; reads become
+HTTP range requests in 1 MB blocks (24-block LRU cache, 3 fetch threads, read-ahead on sequential reads, four read
+positions tracked for the BL and EL streams of a UHD disc). The root file handle is accepted whatever the server's
+start time, so a restarted server revives an old mount. A URL with a login is sent with HTTP Basic auth and logged
+without it.
+
+**Disc folders:** a URL with a `/BDMV/` or `/VIDEO_TS/` path part, or a folder URL ending in `/`, is listed with
+WebDAV `PROPFIND` (`Depth: infinity` per top folder, `Depth: 1` folder by folder as fallback; only `BDMV`,
+`CERTIFICATE`, `AACS`, `VIDEO_TS`, `AUDIO_TS`) and published as a UDF 2.01 image built in memory: VRS at sectors
+16-18, main and reserve VDS at 32 and 48 (PVD, IUVD, PD, LVD, USD, TD), LVID at 64, AVDP at 256 and at the last
+sector, then the file set. Every file's data starts on its own 1 MB image block, so one cache block is one range
+request of one file.
+
+**The hook** (`src/dlnaiso/hook`, 2949 bytes at `0x01c06000` + 2.4 KB of data, `.text1`):
+
+| Site | Original | Change |
+|---|---|---|
+| `0x944484` (DLNA player start, pushes and browser) | `push.w {r4-r9,lr}; mov r4,r0; sub sp,#0x10c` | `ldr.w pc,[pc]` -> `dmr_try`: a disc image (MIME, extension, `BDMV`/`VIDEO_TS` link) is published with `ipcd_exec("sh /tmp/dlnaiso.sh dmrN URL")` and played with `bd_play_ISO_and_file("/mnt/dlnaiso/dmrN.iso")`; anything else continues in the stock function |
+| `0x946318` (`lu_dmr_player_msg_cb`: play, pause, stop, seek from the control point) | `push.w {r4-r8,lr}; movs r6,#0; sub sp,#0x100` | `dmc_try`: while a disc plays, Pause, Play and Stop become remote keys (`0x0071410c`); a status thread reports PLAYING / PAUSED / STOPPED and the position (`c_pbmg_pbc_stt_get`, `c_pbmg_time_info_get`, the disc menu as `00:00:00`) through the DMR library's state strings |
+| `0xc04628`, `0xc04630` (browser classifier extensions) | `".mpe"`, `".xvid"` | `".iso"`, `"blurayiso"` |
+| `0xc045cc`, `0xc045d4` | `movs r4,#0x23` / `#0x25` | `movs r4,#0x3b`: DLNA type 0x3b, shown with the ISO tag and label |
+| `0xc04fea`, `0xc05110` (item name) | `tbb` entry `0x72`, `".xvid"` | `0x49` (the type 0x25 code), `".iso"`: without it the row is empty |
+| `0x1c004ac` (jailbreak browser `play_by_index`) | `beq` ISO branch | `jb_isofix`: `/dlna/` paths take the normal route (the jailbreak would loop-mount the `/dlna/` path) |
+
+`dmrhook.sh` checks fingerprints of the program file (the PLT entries used, the player functions called, both hooked
+functions, the classifier and name code, the jailbreak's `play_by_index` and ISO player entry), the original or
+patched bytes at every site and a zero (or this hook's) code area before writing. `dlnaiso.sh --boot` (from
+`dvmkv.sh`) starts the server, mounts `/mnt/dlnaiso`, writes `/tmp/dlnaiso.sh` (what the hook runs) and turns the
+hook on.
 
 ## Player program layouts
 

@@ -18,6 +18,11 @@ switched to and from every other one (PGS with SRT, ASS and VobSub; VobSub in th
 subtitles keep their timing after a seek, and SD files played in Source Direct reach the TV with the right 4:3 or
 16:9 flag. See [Oppo bugs fixed](#oppo-bugs-fixed-subtitles-and-picture).
 
+**Plus DLNA disc images and a boot message (v2.1.0):** Blu-ray, UHD Blu-ray and DVD disc images (ISO) and disc
+folders play over DLNA, pushed from a phone or tablet app or picked in the player's DLNA browser, with their disc
+menus. And after every boot the player says on screen whether all patches loaded. See
+[DLNA disc images](#dlna-disc-images-v210) and [Boot message](#boot-message-v210).
+
 ---
 
 > ## ⚠️ DISCLAIMER: READ THIS FIRST
@@ -53,6 +58,8 @@ subtitles keep their timing after a seek, and SD files played in Source Direct r
 - [MP4 files (v1.8.0)](#mp4-files-v180)
 - [Factory menu](docs/FACTORY.md)
 - [Video options (v2.0.2)](#video-options)
+- [DLNA disc images (v2.1.0)](#dlna-disc-images-v210)
+- [Boot message (v2.1.0)](#boot-message-v210)
 - [Factory menu](#factory-menu)
 - [Requirements](#requirements)
 - [Compatibility](#compatibility)
@@ -257,22 +264,27 @@ list; the file as shipped (no languages) switches the list off. `dvmkv.log` show
 
 ## Video options
 
-Three settings that Oppo's Setup menu does not have. They are part of the Dolby Vision MKV fix and are set in a text
-file, **`oppo-dv-mkv-options.txt`**, that comes in the zip next to the `AutoScript` folder. All three ship
-**off** (`stock`): nothing changes until you edit the file. To change one, edit the file on the USB stick and run
-the installer again (see [Install](#install)); running the installer without the file keeps what is installed.
+Settings that Oppo's Setup menu does not have, in a text file, **`oppo-dv-mkv-options.txt`**, that comes in every
+install zip next to the `AutoScript` folder. The three video options are part of the Dolby Vision MKV fix and ship
+**off** (`stock`): nothing about the picture changes until you edit the file. To change one, edit the file on the USB
+stick and run the installer again (see [Install](#install)); running the installer without the file keeps what is
+installed.
 
 ```
 native_25p = on
 menu_refresh = 60
 default_language = en
+boot_message = on
+dlna_iso = on
 ```
 
 | Option | Values | What it does |
 |---|---|---|
 | `native_25p` | `on`, `off` | HD files at 25, 29.97 or 30 frames/s play at that rate instead of 50 / 60 Hz |
 | `menu_refresh` | `60`, `50`, `stock` | refresh rate of the home menu and screen saver |
-| `default_language` | `en de fr es it sv nl pl zh ja ru`, `stock` | the languages a factory reset sets |
+| `default_language` | `en de fr es it sv nl pl zh zh-tw ja ru`, `stock` | the languages a factory reset sets |
+| `boot_message` | `on` (shipped), `off` | the "all patches loaded" message after each boot, see [Boot message](#boot-message-v210) |
+| `dlna_iso` | `on` (shipped), `off` | disc images over DLNA, see [DLNA disc images](#dlna-disc-images-v210) |
 
 ### `native_25p`: 25 and 30 frames/s at their own rate
 
@@ -310,8 +322,62 @@ supported on this player program").
 **Setup > Device Setup > Reset Factory Defaults** puts the player's menus, the disc menu language and the audio
 language back to the firmware's own: Russian on the RU firmware many jailbroken players run. With
 `default_language = en` (or one of the other codes) a reset sets that language instead, and subtitles to Auto (to the
-same language for `zh`, `ja` and `ru`, as the regional firmware does). Your current settings are not changed by
-installing; the option only changes what the next reset writes.
+same language for `zh`, `ja` and `ru`, as the regional firmware does). `zh` gives Simplified Chinese menus;
+`zh-tw` gives Traditional Chinese menus with English disc menus and audio and Chinese subtitles, as the TW firmware
+does. Your current settings are not changed by installing; the option only changes what the next reset writes.
+
+## DLNA disc images (v2.1.0)
+
+The jailbroken Oppo plays disc images (ISO) from a USB disk or a network share with the jailbreak's ISO player,
+disc menus included. Over DLNA it could not: a disc image picked in **Network > DLNA server**, or pushed to the player
+from a phone or tablet app (the Oppo as a DLNA renderer), went to the plain stream player and showed a black screen.
+This part of the Dolby Vision MKV fix makes both work:
+
+| | Stock (jailbroken) | With oppo-dv-mkv |
+|---|---|---|
+| Disc image pushed from an app (a media server app's "Play on", BubbleUPnP and other control points) | black screen; the app's "now playing" panel never closes | plays as a disc: menus, Dolby Vision / HDR, every other fix |
+| Disc image in Network > DLNA server | listed as a video, black screen | **ISO** tag, plays as a disc |
+| Blu-ray or DVD folder (`BDMV`, `VIDEO_TS`) on a WebDAV server, a link into it pushed from an app | only the one file in the link plays | the whole folder plays as a disc, menus included |
+| The app's Stop, Pause and Play while a disc plays | - | work (as the remote's keys); the app shows PLAYING, PAUSED, STOPPED, `00:00:00` in the disc menu, then the film's time |
+
+**Recognised as a disc image:** MIME `video/iso`, `video/x-iso`, `application/x-iso9660-image`,
+`application/x-iso-image` or `application/x-cd-image`, or a link ending in `.iso`, `.blurayiso` or `.dvdiso`. A link
+to a file inside a disc folder's `BDMV` or `VIDEO_TS` (`.../BDMV/index.bdmv`, `.../BDMV/STREAM/00800.m2ts`), or a
+folder link ending in `/`, plays the whole folder; a release folder that holds the disc folder one level down is
+found too.
+
+**How:** a small server on the player (`dlnaiso`, on 127.0.0.1 only) makes the DLNA link look like a file. The
+kernel mounts it over NFS at `/mnt/dlnaiso`, every read becomes an HTTP range request to the DLNA server, and the
+jailbreak's ISO player loop-mounts that file as it does an ISO on a network share. A disc folder is listed once
+(WebDAV `PROPFIND`, under a second for a whole disc) and served as a disc image put together in memory (UDF); the
+files stay on the server and every read of one becomes a range request for that file. A link may carry a login
+(`http://user:password@server/...`): it is sent as HTTP Basic auth and never written to the log.
+
+**Needs** the Dolby Vision MKV fix (it is part of it) and a player program with the jailbreak's ISO player: the RU
+65-0131 program and its jailbreak copies (RU and USA jailbreak, jb_overlay V3, rebranded clones). On other programs
+the installer leaves it out and says so in `oppo-dv-mkv-result.txt`. The server has to deliver what the disc needs: a
+UHD disc about 15 MB/s sustained. Turn it off with `dlna_iso = off` in the [options](#video-options).
+
+## Boot message (v2.1.0)
+
+After every boot, about 25 seconds after power-on, the player shows for 10 seconds in the middle of the screen, in
+its own popup (the bar Oppo uses for "Zoom is not available for Dolby Vision content."):
+
+| Message | Meaning |
+|---|---|
+| `oppo-dv-mkv v2.1.0-beta: all patches loaded` | every installed part loaded. `boot_message = off` hides it |
+| `oppo-dv-mkv: NOT loaded: DV metadata, hvcC (see dvmkv.log)` | the named parts did not load; their lines in `/mnt/ubi_boot/oppo-dv-mkv/dvmkv.log` say why. Shown also with `boot_message = off` |
+| `oppo-dv-mkv: patches skipped for this boot (fail-safe)` | the [fail-safe](#uninstall-and-emergency-off-switch) skipped the patches after two boots that were cut short; the next boot tries them again |
+
+No message at all: the patches were disabled after a crash (see `wrapper.log`), or the player program is not
+supported. The message works on the RU 65-0131 program family only (RU and USA jailbreak, jb_overlay V3, rebranded
+clones); elsewhere the installer's result says `boot message: no`, and everything else works as before.
+
+**How:** Oppo's own code shows it. A 560-byte stub sits in the jailbreak's free code area; while a message is
+pending the player's `usleep` import points at it, so the first player thread that sleeps (within 0.1 s) shows the
+popup with the stock widget calls, without its "not allowed" icon. After the popup has gone, the bar goes back to
+its place, the icon is visible again for Oppo's own tip and the import points at `usleep` again. Details:
+[docs/TECHNICAL.md](docs/TECHNICAL.md), Part 6.
 
 ## Factory menu
 
@@ -455,17 +521,18 @@ it privately.
 
    | File | Installs |
    |---|---|
-   | `oppo-dv-mkv-vX.Y.Z-full.zip` | Dolby Vision MKV fix + better subtitles + factory menu shortcut |
+   | `oppo-dv-mkv-vX.Y.Z-full.zip` | Dolby Vision MKV fix (with DLNA disc images) + better subtitles + factory menu shortcut |
    | `oppo-dv-mkv-vX.Y.Z-mkv-subtitles.zip` | Dolby Vision MKV fix + better subtitles |
    | `oppo-dv-mkv-vX.Y.Z-mkv-only.zip` | Dolby Vision MKV fix only |
    | `oppo-dv-mkv-vX.Y.Z-subtitles-only.zip` | better subtitles only |
    | `oppo-dv-mkv-vX.Y.Z-factory-menu-only.zip` | factory menu shortcut only |
 
    Every part is checked on its own (see [Compatibility](#compatibility)). A part that cannot be installed safely on
-   your player is skipped, and the others are still installed.
-2. Unzip it to the **root** of a FAT32 USB stick. You should see `AutoScript/` and `README.txt` at the top level of
-   the stick (and `oppo-dv-mkv-languages.txt` and `oppo-dv-mkv-options.txt` in zips with the Dolby Vision part, see
-   [Language list](#language-list) and [Video options](#video-options)).
+   your player is skipped, and the others are still installed. Every zip also installs the
+   [boot message](#boot-message-v210).
+2. Unzip it to the **root** of a FAT32 USB stick. You should see `AutoScript/`, `README.txt` and
+   `oppo-dv-mkv-options.txt` at the top level of the stick (and `oppo-dv-mkv-languages.txt` in zips with the Dolby
+   Vision part, see [Language list](#language-list) and [Video options](#video-options)).
 3. Power the player **off**. Plug the stick into the **rear** USB port, and make sure no other USB storage is
    connected. Power the player **on**.
    - At boot the player runs `AutoScript/install.sh` from the stick. It takes a second or two.
@@ -475,7 +542,9 @@ it privately.
    `not needed` with the reason, or `not in this zip`. `FAILED` means nothing could be installed, and nothing was
    changed (`NOTHING TO INSTALL`: the player does not need what is in this zip, nothing was changed). The full log
    is `oppo-dv-mkv.log`.
-6. Power the player **on**. From now on the fix is applied automatically at every boot.
+6. Power the player **on**. From now on the fix is applied automatically at every boot. About 25 seconds after
+   power-on the player shows `oppo-dv-mkv <version>: all patches loaded` for 10 seconds (see
+   [Boot message](#boot-message-v210)).
 
 The installer also works as an updater: running a newer release the same way replaces the files (it updates any
 earlier version in place, also one chained to jb_overlay, and resets the fail-safe counters). You can switch
@@ -493,12 +562,20 @@ are not.
     the player exiting (a hang, or the power cord pulled within 90 seconds) count; or
   - if the player program crashes within 120 seconds of a patched start. In this case it reboots once with the
     patches disabled.
+  - Since v2.1.0 the screen says so on the boot that skips them: `oppo-dv-mkv: patches skipped for this boot
+    (fail-safe)` (the popup is the only patch on that boot; a crash then disables it too).
 - Logs on the player: `/mnt/ubi_boot/oppo-dv-mkv/dvmkv.log` and `wrapper.log`.
 - **Extras** (add-ons in `/mnt/ubi_boot/oppo-dv-mkv-extras/`) are not removed by the uninstaller; without oppo-dv-mkv
   they simply no longer start. They follow the same fail-safes: when the patches are skipped, so are the extras.
 
 ## Known limitations
 
+- **DLNA disc images (v2.1.0):** seeking from the app does nothing (use the remote). A disc folder needs a WebDAV
+  server; a link into a `BDMV` folder on a plain web server plays only that file, the stock way. Throughput is the
+  server's: tested at 15-16 MB/s, enough for UHD discs, but slower servers stutter. Only the RU 65-0131 program family
+  (see [DLNA disc images](#dlna-disc-images-v210)). DVD disc images and DVD folders were not tested.
+- **Boot message (v2.1.0):** English only. If the screen saver is on when the message comes (more than about 25
+  seconds without a key at boot), it is not seen. Only the RU 65-0131 program family.
 - **Single-track profile 7 only.** Almost all P7 MKVs (MakeMKV, mkvmerge) store the base layer, the enhancement
   layer and the RPU in **one** video track, and that is what this supports. **Dual-track** P7 MKVs (BL and EL in
   two separate video tracks) are **untested** and probably play as HDR10.
@@ -1385,9 +1462,37 @@ TV's input status (the C1 now and then reports 2160p25 as 24 Hz; the player's lo
 - `menu_refresh = 60`: home menu at 2160p60 (Auto) and 1080p60 (Source Direct) right after power-on and after 24,
   25 and 50 Hz films; three cold boots.
 - `default_language`: the four defaults read back as set (`en/en/en/auto`). A real factory reset was **not** run.
+  `zh-tw` (next release): read back as `zh-tw/en/en/zh` on the player and on a copy of every program's memory;
+  `zh_tw` and `zh-TW` are read the same way, an unknown code keeps the firmware's own.
 - Offline: the option tables for the eleven player programs we hold, applied to a copy of each program's memory and
   taken off again (byte-identical afterwards); the re-ordered branches disassembled; a program changed inside a
   patched block is refused.
+
+### DLNA disc images (v2.1.0)
+
+Pushed from a media server's Android app ("Play on") and with a test script that sends the same UPnP commands, on
+the RU player and the LG C1; each disc started from the app and stopped from the app or the remote.
+
+| Test | Result |
+|---|---|
+| UHD Blu-ray disc image (`video/iso`) from a DLNA server | disc menu, then the film; chapter skip and time jump; 2+ minutes at 15-16 MB/s, no errors |
+| The same image picked in Network > DLNA server | **ISO** tag in the list, plays as a disc |
+| The app while a disc plays | `00:00:00` in the disc menu, then the film's time and length; Pause, Play, Stop act as the remote's keys; Stop or the end of the disc -> STOPPED, the panel closes |
+| UHD disc folder on a WebDAV server, link to `BDMV/index.bdmv` | playing in 5 s, BD-J menu, then the film; 9-13 MB/s; nine chapter skips; Pause, Play, Stop from the app |
+| Blu-ray disc folder with 643 files, link to an `.m2ts` in `BDMV/STREAM` | the whole disc (91 titles; folder listed in 4.9 s on the player), disc menu, film; remote Stop -> STOPPED about 2 s later |
+| Release folder link ending in `/`, disc folder one level down | found in 2 s, plays; Stop from the app |
+| Disc folder image on the player without playback | 51 small files byte-identical, first and last MB of a 90 GB `.m2ts` identical, 600 MB read 40 GB in at 15.9 MB/s |
+| Installed with the release installer, after a power cycle | server, `/mnt/dlnaiso` and the hook up at 25 s; every byte the hook writes identical to the build that played pushed discs after a reboot during development |
+| Fingerprints of everything the hook uses, on the RU and USA jailbreak, jb_overlay V3 and a rebranded clone's programs | identical; the CXUHD and the stock regional programs are refused |
+
+### Boot message (v2.1.0)
+
+| Test | Result |
+|---|---|
+| Message on the home menu (RAM test, screenshot of the player's menu plane) | the bar in the middle of the screen with the text, no icon; gone after the set time; then the bar back in its place and the icon visible again; `usleep` import back to libc |
+| Screen saver on | the popup is drawn but not seen (the screen saver owns the screen) |
+| Installer, offline: every earlier scenario plus the new parts (RU, jb_overlay, USA jailbreak, CXUHD, updates from v1.4.0 to v2.0.0-beta and back) | 96 of 96 steps pass; on the CXUHD both new parts are left out with the reason |
+| Installed with the release installer on the RU player, two power cycles | `message: shown` at 36 s both times, every part loaded; afterwards bar and icon back, `usleep` import back to libc; the same build shown again on the home menu and captured |
 
 ### Extras (v1.7.1)
 
@@ -1495,6 +1600,11 @@ program if that file exists. The installer puts there:
 /mnt/ubi_boot/oppo-dv-mkv/alacdec.bin, bdpaudec.db  ALAC audio decoder of firmware 56/60 and the player's audio decoder
                                       file with it, built at install time, swapped into /res at boot
 /mnt/ubi_boot/oppo-dv-mkv/fpage.sh    factory menu shortcut (one layout per regional v65 player program; on|off|status|check)
+/mnt/ubi_boot/oppo-dv-mkv/vidopt.sh   video options in the player program (apply|off|status|check|get)
+/mnt/ubi_boot/oppo-dv-mkv/options.txt oppo-dv-mkv-options.txt from the stick (video options, boot_message, dlna_iso)
+/mnt/ubi_boot/oppo-dv-mkv/bootmsg.sh, bootmsg.bin  boot message in the player's own popup (show TEXT [MS]|status|check)
+/mnt/ubi_boot/oppo-dv-mkv/dlnaiso, dlnaiso.sh, dmrhook.sh, dmrhook.bin  DLNA disc images: local NFS server, its helper,
+                                      player hook (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv-extras/     optional add-ons by other authors, started at boot (see Extras; not installed by oppo-dv-mkv)
 ```
 
@@ -1559,6 +1669,25 @@ requests.
 </p>
 
 ## Changelog
+
+- **v2.1.0-beta: DLNA disc images; boot message; Traditional Chinese reset language.** A beta: tested on one player
+  (RU) and one TV (LG C1).
+  - **DLNA disc images:** Blu-ray, UHD Blu-ray and DVD disc images (ISO) and disc folders (`BDMV`, `VIDEO_TS` on a
+    WebDAV server) play over DLNA, pushed from a phone or tablet app or picked in Network > DLNA server, as a disc
+    with its menus. Before, they showed a black screen. While a pushed disc plays, the app's Stop, Pause and Play
+    work and its "now playing" panel shows the disc's state and closes at the end. Part of the Dolby Vision MKV fix;
+    RU 65-0131 program family (RU and USA jailbreak, jb_overlay V3). `dlna_iso = off` turns it off. See
+    [DLNA disc images](#dlna-disc-images-v210).
+  - **Boot message:** about 25 seconds after power-on the player shows for 10 seconds whether every installed patch
+    loaded (`oppo-dv-mkv v2.1.0-beta: all patches loaded`), names the parts that did not (also with
+    `boot_message = off`), and says so when the fail-safe skipped the patches. In every zip. See
+    [Boot message](#boot-message-v210).
+  - **`default_language = zh-tw`:** a factory reset sets Traditional Chinese menus, English disc menus and audio and
+    Chinese subtitles, as the TW firmware does. `zh` stays Simplified Chinese. In v2.0.2-beta `zh-tw` was read as
+    `zh`. See [Video options](#default_language-what-a-factory-reset-sets).
+  - `oppo-dv-mkv-options.txt` now comes in every install zip (two new options, `boot_message` and `dlna_iso`, both
+    on). Updating from v2.0.2-beta adds `bootmsg.sh`, `bootmsg.bin`, `dlnaiso`, `dlnaiso.sh`, `dmrhook.sh` and
+    `dmrhook.bin` and replaces `dvmkv.sh` and the boot wrapper; the patch scripts are unchanged.
 
 - **v2.0.2-beta: video options (25 / 30 frames/s at their own rate, 60 Hz menu, reset language); subtitle
   timing.** A beta: tested on one player (RU) and one TV (LG C1). A new file on the stick,
