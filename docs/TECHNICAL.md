@@ -882,12 +882,18 @@ output raster at Dolby context `0x7eea45e8` `+0x20` / `+0x24`. With no source re
 - list n at `0x7ede562c + 0x14 n`, first region at `+4`; region n at `0x7ede562c + 0xe10 + 0xc n`, next at `+8`;
 - region headers, 0x50 bytes: `[0x7ede1114] + 0x50 n` for n < 0x78, `[0x7ede1118] + 0x50 (n − 0x78)` above;
 - header: colour mode = byte 3 >> 4; bitmap (physical) = (word `+4` & 0xffffff) << 4 | bits 7-8 of u16 `+0x1e` << 28
-  | bits 2-3 of byte `+0x18` << 30; pitch = (u16 `+8` & 0x7ff) × 16; width u16 `+0x24`, height `+0x26`, x `+0x2e`,
-  y `+0x2a`; palette = (word `+0xc` & 0x3ffffff) << 4 | bits 4-5 of byte `+0x18` << 30.
+  | bits 2-3 of byte `+0x18` << 30; pitch = (u16 `+8` & 0x7ff) × 16; bitmap size u16 `+0x24` × `+0x26`; the window
+  shown: its first pixel at (u16 `+0x20`, `+0x22`) of the bitmap (HClip, VClip), width u16 `+0x2c`, height `+0x28`,
+  at x `+0x2e`, y `+0x2a` on the canvas (the driver's own `_OSD_RGN_Get*` getters read these fields); palette =
+  (word `+0xc` & 0x3ffffff) << 4 | bits 4-5 of byte `+0x18` << 30.
 
 During playback the UI plane (0: info bar, menus, PGS of PGS-only files) is one 1920×1080 ARGB8888 surface (mode
 14), the subtitle plane (2) one ARGB4444 surface (mode 13, text subtitles) or 8-bit palette surface (mode 2,
-VobSub, alpha in byte 3 of the palette entry), transparent where nothing is drawn. Every enabled plane, up to four
+VobSub, alpha in byte 3 of the palette entry), transparent where nothing is drawn. PGS in a file that also has
+other subtitle formats (drawn by the player's Blu-ray subtitle decoder) is a window of a full-screen 8-bit palette
+bitmap on plane 2, only as big as the subtitle and clipped at its own position, for example 1110×117 at 405,963.
+Up to v2.1.0-beta the stub took the bitmap size for the window, found that window running off the canvas and
+skipped it, so those subtitles in the bars were blanked by the TV. Every enabled plane, up to four
 regions each, is sampled at every 8th pixel of every 4th row, only in rows and columns outside the active area;
 a pixel with alpha widens that side, with one sampling step of margin. A region in another format counts as drawn
 as a whole. Bitmaps and palettes are read through the kernel's linear mapping (physical + `0x80000000`) and only

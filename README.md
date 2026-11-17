@@ -364,7 +364,7 @@ its own popup (the bar Oppo uses for "Zoom is not available for Dolby Vision con
 
 | Message | Meaning |
 |---|---|
-| `oppo-dv-mkv v2.1.0-beta: all patches loaded` | every installed part loaded. `boot_message = off` hides it |
+| `oppo-dv-mkv v2.1.1-beta: all patches loaded` | every installed part loaded. `boot_message = off` hides it |
 | `oppo-dv-mkv: NOT loaded: DV metadata, hvcC (see dvmkv.log)` | the named parts did not load; their lines in `/mnt/ubi_boot/oppo-dv-mkv/dvmkv.log` say why. Shown also with `boot_message = off` |
 | `oppo-dv-mkv: patches skipped for this boot (fail-safe)` | the [fail-safe](#uninstall-and-emergency-off-switch) skipped the patches after two boots that were cut short; the next boot tries them again |
 
@@ -616,9 +616,12 @@ are not.
     and menus that reach into the bars. In scenes whose metadata lifts the blacks, the rows of the bar that such a
     graphic occupies are lifted with the picture, across the full width, for as long as it is shown. The rest of
     the bars stays black and the picture itself never changes. Subtitles that sit inside the picture cause nothing.
-  - Subtitles and menus in the bars were checked with text subtitles (also moved down into the bar), the info bar
-    and the option menu. VobSub
-    and PGS subtitles are handled by the same code but were not looked at in a Dolby Vision file.
+  - Subtitles and menus in the bars were checked with text subtitles (also moved down into the bar), PGS (alone and
+    next to other subtitle formats), the subtitles of a UHD Blu-ray image, the info bar and the option menu.
+    VobSub is handled by the same code but was not looked at in a Dolby Vision file.
+  - **The disc's own graphics in the bars** (a Blu-ray's pause bar or pop-up menu, drawn by the disc's Java program)
+    are blanked by the TV there; the part inside the picture shows. The patch cannot read that graphics layer yet.
+    The player's own menus and the disc's subtitles are not affected.
   - Output resolutions other than 1920x1080 and 3840x2160: the active area is sent without the widening.
   - L10 (CM 4.0 target display) is passed on, but no test file had it.
   - Player-led (LLDV) mode is not changed: there the player does the mapping, with its CM 2.9 code.
@@ -1668,6 +1671,16 @@ requests.
 </p>
 
 ## Changelog
+
+- **v2.1.1-beta: subtitles in the black bars blanked in TV-led Dolby Vision (since v2.0.0-beta).** A fix for
+  [fix 24](#24-tv-led-dolby-vision-metadata-lost-on-the-way-to-the-tv-cm-29-and-cm-40-v200): PGS subtitles in an MKV
+  that also has other subtitle formats (SRT, ASS, VobSub), and the subtitles of Blu-ray discs and disc images, were
+  missing wherever they reached into the black bars (for example with Subtitle Shift), while the part inside the
+  picture showed. The player draws these subtitles as a small window cut out of a full-screen bitmap; the patch read
+  the bitmap's size as the window's, took the window for one running off the screen and left it out, so the active
+  area sent to the TV was not widened and the TV blanked the bars over it. Checked on the LG C1 with test files and a
+  UHD Blu-ray image. Text subtitles, VobSub and MKVs whose only subtitle format is PGS were not affected. Updating
+  replaces `dvcm.sh`; everything else is unchanged.
 
 - **v2.1.0-beta: DLNA disc images; boot message; Traditional Chinese reset language.** A beta: tested on one player
   (RU) and one TV (LG C1).
