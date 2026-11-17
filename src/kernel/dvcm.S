@@ -407,9 +407,9 @@ c4_gfx: push    {r4, r5, r6, r7, r8, r9, r10, r11, lr}
         subhs   r2, r2, #0x2580
         mov     r3, #0x50
         mla     r10, r3, r1, r2         @ r10 = region header
-        ldrh    r2, [r10, #0x24]
+        ldrh    r2, [r10, #0x2c]        @ the window on the canvas (output size; +0x24 / +0x26 are the bitmap's)
         ubfx    r2, r2, #0, #13         @ r2 = width
-        ldrh    r0, [r10, #0x26]
+        ldrh    r0, [r10, #0x28]
         ubfx    r0, r0, #0, #12         @ r0 = height
         ldrh    r5, [r10, #0x2e]
         ubfx    r5, r5, #0, #13         @ r5 = x on the canvas
@@ -467,7 +467,13 @@ c4_gfx: push    {r4, r5, r6, r7, r8, r9, r10, r11, lr}
         orr     r1, r1, r11, lsl #28
         ldrb    r11, [r10, #0x18]
         ubfx    r11, r11, #2, #2
-        orr     r1, r1, r11, lsl #30    @ r1 = physical address of the bitmap: must be in lowmem
+        orr     r1, r1, r11, lsl #30    @ r1 = physical address of the bitmap
+        ldr     ip, [r10, #0x20]        @ the window starts at (HClip, VClip) of the bitmap (PGS: a window of a
+        ubfx    r11, ip, #16, #12       @ full-screen bitmap; everything else seen: the whole bitmap, clip 0)
+        mla     r1, r11, r7, r1
+        ubfx    ip, ip, #0, #13
+        add     r1, r1, ip, lsl r3
+        bic     r1, r1, #3              @ r1 = first pixel of the window, word aligned: must be in lowmem
         cmp     r1, #0x100000
         blo     50f
         cmp     r1, #0x3f000000
