@@ -63,17 +63,27 @@ H=$(od -An -v -tx1 build/dvexit.bin | tr -d ' \n')
 [ $(stat -c %s build/dvexit.bin) -le $((0x7e94d724 - 0x7e94d6c4)) ] || { echo "dvexit.S does not fit its cave"; exit 1; }
 echo "dvexit.sh stub matches dvexit.S"
 # dvcm.sh carries its bdpdrv1 stub as hex, without the last six words (data addresses, which the script reads from
-# the driver on the player): rebuild it from dvcm.S (cave = parse_cmd_line_option, RU addresses) and compare; the
-# hook words in the script must be the branches to the stub's entry points
+# the driver on the player): rebuild it from dvcm.S (cave = parse_cmd_line_option, RU addresses; cave 2 =
+# rpu_payload_dump, section .cave2) and compare; the hook words in the script must be the branches to the stub's
+# entry points, and STUB2N the cave 2 stub without the kernel calls (c4_hiset skips the region)
 zig cc -target arm-freestanding-eabi -mcpu=cortex_a9 -marm -c dvcm.S -o build/dvcm.o
-ld.lld -static -Ttext=0x7eb53688 --defsym read_u_v=0x7eb46690 --defsym ext_skip=0x7eb48648 --defsym list_ret=0x7eb48358 --defsym read_ue_v=0x7eb46310 \
+ld.lld -static -Ttext=0x7eb53688 --section-start=.cave2=0x7eb45298 --defsym read_u_v=0x7eb46690 --defsym ext_skip=0x7eb48648 --defsym list_ret=0x7eb48358 --defsym read_ue_v=0x7eb46310 \
   --defsym read_u_1=0x7eb4692c --defsym get_fixed_metadata=0x7eb55de4 --defsym send_ret=0x7eb3ece4 --defsym update_md_for_hdmi=0x7eb55f9c \
+  --defsym kmap_atomic_pfn=0x800179c4 --defsym __kunmap_atomic=0x800177e4 \
+  --defsym get_md_len=0x7eb5bd54 --defsym core3_md_update=0x7eb3e81c --defsym vdp_setup_sw=0x7e98caa4 \
   -e c4_reset build/dvcm.o -o build/dvcm.elf
 llvm-objcopy -O binary -j .text build/dvcm.elf build/dvcm.bin
+llvm-objcopy -O binary -j .cave2 build/dvcm.elf build/dvcm-c2.bin
 H=$(od -An -v -tx1 build/dvcm.bin | tr -d ' \n')
 [ "$H" = "$(sed -n 's/^STUB=//p' dvcm.sh)ac0ade7ef0bbd27ee845ea7e4017de7e2c56de7e1411de7e" ] || { echo "dvcm.sh STUB does not match dvcm.S"; exit 1; }
+[ "$(od -An -v -tx1 build/dvcm-c2.bin | tr -d ' \n')" = "$(sed -n 's/^STUB2=//p' dvcm.sh)" ] || { echo "dvcm.sh STUB2 does not match dvcm.S"; exit 1; }
 [ $(stat -c %s build/dvcm.bin) -le $((0x7eb53f08 - 0x7eb53688)) ] || { echo "dvcm.S does not fit its cave"; exit 1; }   # the part of the function that is the same in every build
-for h in 0x7eb5512c:c4_l5:eb 0x7eb3ece0:c4_send:ea 0x7eb55134:c4_fixed:eb 0x7eb43eb0:c4_copy:ea 0x7eb48354:c4_list2:ea 0x7eb48630:c4_ext:ea 0x7eb4834c:c4_reset:eb; do
+[ $(stat -c %s build/dvcm-c2.bin) -le $((0x7eb46000 - 0x7eb45298)) ] || { echo "dvcm.S .cave2 does not fit cave 2"; exit 1; }   # up to the end of its page
+s=$(llvm-nm build/dvcm.elf | awk '$3=="c4_hiset"{print $1}'); g=$(llvm-nm build/dvcm.elf | awk '$3=="c4_g50"{print $1}')
+o=$(( (0x$g - 0x$s - 8) >> 2 & 0xffffff )); w=$(printf '%02x%02x%02x%s' $((o & 255)) $((o >> 8 & 255)) $((o >> 16 & 255)) ea)
+i=$(( (0x$s - 0x7eb45298) * 2 )); S2=$(sed -n 's/^STUB2=//p' dvcm.sh)
+[ "$(sed -n 's/^STUB2N=//p' dvcm.sh)" = "$(echo $S2 | cut -c1-$i)$w$(echo $S2 | cut -c$((i + 9))-)" ] || { echo "dvcm.sh STUB2N is not STUB2 with b c4_g50 at c4_hiset"; exit 1; }
+for h in 0x7eb5512c:c4_l5:eb 0x7eb3ece0:c4_sendx:ea 0x7eb55134:c4_fixed:eb 0x7eb43eb0:c4_copy:ea 0x7eb48354:c4_list2:ea 0x7eb48630:c4_ext:ea 0x7eb4834c:c4_reset:eb 0x7e9b3518:c4_pause:eb; do
   s=${h%%:*}; n=${h#*:}; n=${n%%:*}; d=0x$(llvm-nm build/dvcm.elf | awk -v n=$n '$3==n{print $1}')
   o=$(( (d - s - 8) >> 2 & 0xffffff ))
   w=$(printf '%02x%02x%02x%s' $((o & 255)) $((o >> 8 & 255)) $((o >> 16 & 255)) ${h##*:})

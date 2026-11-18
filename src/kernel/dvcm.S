@@ -1,6 +1,9 @@
 @ oppo-dv-mkv: bdpdrv1 stub for the Dolby Vision content mapping metadata sent to the TV in TV-led mode (dvcm.sh).
 @ Linked at 0x7eb53688 (bdpdrv1 at 0x7e8d3000) = parse_cmd_line_option, a command line parser of the Dolby control
-@ path's test harness that nothing in the driver calls. Seven hooks lead here (table in dvcm.sh).
+@ path's test harness that nothing in the driver calls. Eight hooks lead here (table in dvcm.sh). The rest is in a
+@ second cave (section .cave2, linked at 0x7eb45298 = rpu_payload_dump, another debug routine nothing calls): the
+@ reading of bitmaps outside the kernel's linear map (kmap_atomic_pfn, __kunmap_atomic: kernel functions, the same
+@ kernel on every known player) and the L5 update while paused (c4_pause).
 @
 @ 1. CM 4.0. The driver's metadata parser (dm_data_payload_read) knows the extension block levels 1 2 4 5 6 255 of
 @    the first block list and skips the rest; a CM 4.0 RPU carries a second list (count, byte alignment, blocks)
@@ -12,7 +15,7 @@
 @    Tail: magic, block count (byte), pad, byte count (u16), then the blocks (at most 0x180 bytes).
 @    Dovi_Core3_HalSetRawMetadata appends them after the stock blocks.
 @ 2. L5 (active area). Rewritten for the frame the player outputs and widened to what the player draws outside it
-@    (c4_l5, c4_gfx).
+@    (c4_l5, c4_gfx; a disc's BD-J graphics through kmap windows, cave 2), also while paused (c4_pause, cave 2).
 @ Code addresses are the same in every known driver build. The six data addresses are the stub's last six words:
 @ dvcm.sh reads them from the driver on the player (RU values here).
         .syntax unified
@@ -21,6 +24,7 @@
         .equ    STASH_P, 0x1200
         .equ    STASH_M, 0x1100
         .equ    MAXB, 0x180
+        .equ    PST, 0x1290             @ pause stash in the metadata buffer: magic, L5 before widening, fresh, sent without L5
         .equ    LEFT_MIN, 8             @ bits that must be left for a second list (trailing bits and CRC excluded)
 
 @ ---- 1: dm_data_payload_read 0x7eb4834c "strb r0, [r5, #0x4a]" (ext block count) -> bl c4_reset. Flags are kept.
@@ -162,7 +166,7 @@ c4_tab: .byte   3, 12, 12, 12, 0
 c4_copy:
         add     r0, r0, #STASH_P
         add     r1, r1, #STASH_M
-        mov     r2, #(MAXB + 8)
+        mov     r2, #(MAXB + 0x18)      @ (the 16 bytes after the stash overwrite the pause stash's magic: a new frame)
 1:      ldr     r3, [r0], #4
         subs    r2, r2, #4
         str     r3, [r1], #4
@@ -174,9 +178,11 @@ c4_copy:
 c4_fixed:
         add     ip, r1, #STASH_M
         str     ip, [ip]
+        str     ip, [ip, #(PST - STASH_M)]  @ no pause stash for generated metadata
         b       get_fixed_metadata
 
-@ ---- 5: Dovi_Core3_HalSetRawMetadata 0x7eb3ece0 "ldrd r2, r3, [r7]" (after the block copy loop) -> b c4_send
+@ ---- 5: Dovi_Core3_HalSetRawMetadata 0x7eb3ece0 "ldrd r2, r3, [r7]" (after the block copy loop) -> b c4_sendx
+@ (cave 2: L5 out while the screen saver is up), which goes on here
 @ r6 = metadata buffer, r5 = bytes of blocks written, [r8] = sw registers (length at +0x91), [r8, #0x120] = output
         .global c4_send
 c4_send:
@@ -282,7 +288,7 @@ c4_l5:  push    {r4, r5, r6, r7, r8, r9, r10, lr}
         cmp     r10, #4
         bne     2b
         add     r0, r6, #5
-        bl      c4_gfx
+        bl      c4_gfxs                 @ (cave 2: keeps the offsets for c4_pause, then c4_gfx)
         b       9f
 5:      mov     r0, #0x13               @ no L5: close the gap
         mul     r5, r0, r5
@@ -314,8 +320,10 @@ c4_l5:  push    {r4, r5, r6, r7, r8, r9, r10, lr}
         .equ    GLEFT, 0x30
         .equ    GYY, 0x34
         .equ    GRH, 0x38
+        .equ    GVA, 0x3c               @ kmap window (cave 2): its first page's virtual address, 0 = none
         .equ    GPITCH, 0x40
         .equ    GROW, 0x44
+        .equ    GPA, 0x48               @ kmap window: physical address of its first page
         .equ    GFRAME, 0x4c
         .equ    XSTEP, 8
         .equ    YSTEP, 4
@@ -370,6 +378,7 @@ c4_gfx: push    {r4, r5, r6, r7, r8, r9, r10, r11, lr}
         str     r1, [sp, #GMAXY]
         mov     r1, #0
         str     r1, [sp, #GPLANE]
+        str     r1, [sp, #GVA]
 20:     ldr     r0, [sp, #GPLANE]       @ next plane
         cmp     r0, #6
         bhs     60f
@@ -432,7 +441,7 @@ c4_gfx: push    {r4, r5, r6, r7, r8, r9, r10, r11, lr}
         cmp     r1, #13
         beq     32f
         cmp     r1, #2
-        bne     55f
+        bne     c4_g55
         ldr     r11, [r10, #0xc]        @ 8-bit palette (VobSub): alpha is byte 3 of the palette entry
         bic     r11, r11, #0xfc000000
         lsl     r11, r11, #4
@@ -440,9 +449,9 @@ c4_gfx: push    {r4, r5, r6, r7, r8, r9, r10, r11, lr}
         ubfx    r4, r4, #4, #2
         orr     r11, r11, r4, lsl #30
         cmp     r11, #0x100000
-        blo     55f
+        blo     c4_g55
         cmp     r11, #0x3e000000
-        bhs     55f
+        bhs     c4_g55
         add     lr, r11, #0x80000000
         add     lr, lr, #3              @ lr = alpha of palette entry 0
         mov     r3, #0
@@ -473,22 +482,25 @@ c4_gfx: push    {r4, r5, r6, r7, r8, r9, r10, r11, lr}
         mla     r1, r11, r7, r1
         ubfx    ip, ip, #0, #13
         add     r1, r1, ip, lsl r3
-        bic     r1, r1, #3              @ r1 = first pixel of the window, word aligned: must be in lowmem
+        bic     r1, r1, #3              @ r1 = first pixel of the window, word aligned
         cmp     r1, #0x100000
         blo     50f
-        cmp     r1, #0x3f000000
-        bhs     50f
-        mla     r11, r7, r0, r1
+        mla     r11, r7, r0, r1         @ r11 = the window's end
         cmp     r11, #0x3f000000
-        bhi     50f
-        add     r1, r1, #0x80000000
-        str     r0, [sp, #GRH]
+        cmpls   r1, #0x3f000000
+        bhs     c4_hiset                @ not all in lowmem: through a kmap window (cave 2), back at c4_g39 or 50
+        add     r1, r1, #0x80000000     @ lowmem: through the kernel's linear map
+        .global c4_g39
+c4_g39: str     r0, [sp, #GRH]
         str     r7, [sp, #GPITCH]
         str     r1, [sp, #GROW]
         mov     r0, #0
         str     r0, [sp, #GYY]
 40:     ldr     r0, [sp, #GROW]         @ one row: r0 = its pixels, r10 = y, r7 = 1 in a row above / below the area
-        ldr     r1, [sp, #GYY]
+        cmn     r0, #0x40000000         @ at 0xc0000000 or above: in the kmap window, map the row's pages (cave 2)
+        bhs     c4_hmap
+        .global c4_g41
+c4_g41: ldr     r1, [sp, #GYY]
         add     r10, r6, r1
         ldr     r7, [sp, #GY0]
         cmp     r10, r7
@@ -547,30 +559,16 @@ c4_gfx: push    {r4, r5, r6, r7, r8, r9, r10, r11, lr}
         ldr     ip, [sp, #GRH]
         cmp     r1, ip
         blo     40b
+        .global c4_g50
+c4_g50:
 50:     ldr     r1, [sp, #GLEFT]        @ next region of the plane
         subs    r1, r1, #1
         str     r1, [sp, #GLEFT]
         beq     20b
         ldr     r1, [sp, #GNEXT]
         b       30b
-55:     ldr     ip, [sp, #GMINX]        @ a pixel format not known here: the whole region counts as drawn
-        cmp     r5, ip
-        strlt   r5, [sp, #GMINX]
-        add     r1, r5, r2
-        sub     r1, r1, #1
-        ldr     ip, [sp, #GMAXX]
-        cmp     r1, ip
-        strgt   r1, [sp, #GMAXX]
-        ldr     ip, [sp, #GMINY]
-        cmp     r6, ip
-        strlt   r6, [sp, #GMINY]
-        add     r1, r6, r0
-        sub     r1, r1, #1
-        ldr     ip, [sp, #GMAXY]
-        cmp     r1, ip
-        strgt   r1, [sp, #GMAXY]
-        b       50b
-60:     ldr     r4, [sp, #GK]           @ new offsets where something was found; one sampling step of margin
+60:     bl      c4_hdone                @ unmap the kmap window (cave 2)
+        ldr     r4, [sp, #GK]           @ new offsets where something was found; one sampling step of margin
         ldr     r0, [sp, #GL5]
         ldr     r1, [sp, #GMINX]
         ldr     r2, [sp, #GX0]
@@ -618,6 +616,11 @@ c4_gfx: push    {r4, r5, r6, r7, r8, r9, r10, r11, lr}
 90:     add     sp, sp, #GFRAME
         pop     {r4, r5, r6, r7, r8, r9, r10, r11, pc}
 
+        .global c4_lits
+c4_lits:                                @ for cave 2 (no data addresses there): r0 = the six words below
+        adr     r0, c4_osd
+        bx      lr
+
 c4_m4444: .word 0xf000f000
 c4_magic: .word 0x43344d44
 @ data addresses (RU build); dvcm.sh writes the ones of the player's build
@@ -627,3 +630,312 @@ c4_ctx: .word   0x7eea45e8              @ Dolby context: output raster at +0x20 
 c4_pla: .word   0x7ede1740              @ OSD plane n at +0x38 n: region list at +0xc
 c4_lst: .word   0x7ede562c              @ region list n at +0x14 n: first region at +4; region n at +0xe10 + 0xc n: next at +8
 c4_hdr: .word   0x7ede1114              @ -> region headers (0x50 each): regions 0..0x77, then 0x78.. (less 0x2580)
+
+@ ==== cave 2: rpu_payload_dump 0x7eb45298, an RPU dump routine of Dolby's debug code that nothing calls (the same in
+@ every known driver build; 3432 bytes up to the end of its page). The rest of c4_gfx, entered by b with its frame at sp.
+@ A disc's BD-J graphics (plane 1) are in the reserved "ch3" memory (kernel drvmem_base_ch3 .. + drvmem_size_ch3:
+@ physical 0x40000000, 40 MB), which the kernel's linear map does not cover; each bitmap has only its own mapping in
+@ the vmalloc area. Such a bitmap is read through kmap_atomic_pfn, one sampled row at a time: the row's page and the
+@ two after it. Nested kmap_atomic calls take consecutive fixmap slots, so the three pages form one 12 KB window (a
+@ row of the 1920-pixel canvas is at most 7680 bytes). GROW then holds the row as window base + offset (0xfff00000 and
+@ up), or as 0xc0000000 + offset for a row that is not mapped (all inside the active area: nothing is read; the bias
+@ keeps the sum from wrapping); GVA = window base (0: nothing mapped), GPA = physical address of the window's first page.
+        .section .cave2, "ax", %progbits
+        .p2align 2
+        .equ    CH3, 0x805b3860         @ kernel: drvmem_base_ch3, drvmem_size_ch3
+        .equ    HF, 16                  @ frame offset after the push of four registers
+
+@ a pixel format not known here: the whole region counts as drawn (r5 r6 = x y, r2 r0 = width height)
+        .global c4_g55
+c4_g55: ldr     ip, [sp, #GMINX]
+        cmp     r5, ip
+        strlt   r5, [sp, #GMINX]
+        add     r1, r5, r2
+        sub     r1, r1, #1
+        ldr     ip, [sp, #GMAXX]
+        cmp     r1, ip
+        strgt   r1, [sp, #GMAXX]
+        ldr     ip, [sp, #GMINY]
+        cmp     r6, ip
+        strlt   r6, [sp, #GMINY]
+        add     r1, r6, r0
+        sub     r1, r1, #1
+        ldr     ip, [sp, #GMAXY]
+        cmp     r1, ip
+        strgt   r1, [sp, #GMAXY]
+        b       c4_g50
+
+@ from the region setup: the window r1 (physical, first pixel) .. r11 is not all in lowmem. r0 = height, r7 = pitch,
+@ r2 = width, r3 = log2 bytes per pixel, lr = palette (8-bit); r10 r11 ip free. Read only inside ch3: map the first
+@ row and go on at c4_g39 with r1 = the row in window form; else skip the region.
+        .global c4_hiset
+c4_hiset:
+        lsl     ip, r2, r3
+        cmp     ip, #0x1f00             @ a row must fit the window from any page offset (7680 bytes at most here)
+        bhi     c4_g50
+        movw    ip, #:lower16:CH3
+        movt    ip, #:upper16:CH3
+        ldr     r10, [ip]
+        ldr     r11, [ip, #4]
+        add     r11, r11, r10           @ ch3: r10 .. r11
+        subs    r11, r11, r1            @ bytes from the window to the end of ch3
+        bls     c4_g50
+        cmp     r1, r10
+        blo     c4_g50
+        mul     ip, r7, r0
+        cmp     ip, r11
+        bhi     c4_g50
+        mov     r11, r1
+        push    {r0, r2, r3, lr}
+        ldr     r0, [sp, #HF + GVA]     @ still mapped for an earlier region
+        cmp     r0, #0
+        blne    c4_unmap3
+        mov     r0, r11
+        bl      c4_map3
+        str     r1, [sp, #HF + GVA]
+        bfc     r11, #0, #12
+        str     r11, [sp, #HF + GPA]
+        mov     r1, r0
+        pop     {r0, r2, r3, lr}
+        cmp     r1, #0
+        beq     c4_g50
+        b       c4_g39
+
+@ from the top of the row loop: r0 = the row (0xc0000000 and up, see above). A row with something to read that is not
+@ in the window is mapped (old window unmapped first); back at c4_g41 with r0 = the row's address. r2 r3 r4 r5 r6 r8
+@ r9 lr in use; r1 r7 r10 r11 ip free.
+        .global c4_hmap
+c4_hmap:
+        ldr     ip, [sp, #GVA]
+        cmn     r0, #0x100000           @ 0xfff00000 and up: an address in the window's pages
+        subhs   r0, r0, ip
+        sublo   r0, r0, #0xc0000000     @ else a row that was not mapped, kept as 0xc0000000 + offset (no wrap)
+        ldr     r1, [sp, #GYY]          @ r0 = the row's offset from the window base
+        add     r1, r1, r6              @ y of the row
+        ldr     r7, [sp, #GY0]
+        cmp     r1, r7
+        ldrge   r7, [sp, #GY1]
+        cmpge   r7, r1
+        ble     1f                      @ above or below the area
+        cmp     r5, r8
+        addge   r1, r5, r2
+        cmpge   r9, r1
+        addge   r0, r0, #0xc0000000
+        bge     c4_g41                  @ the whole row is inside the area: nothing is read, nothing mapped
+1:      add     r1, r0, r2, lsl r3
+        add     r1, r1, #4              @ the last read is a word
+        cmp     r1, #0x3000
+        addls   r0, r0, ip
+        bls     c4_g41                  @ the whole row is in the window
+        ldr     r11, [sp, #GPA]
+        add     r11, r11, r0            @ the row's physical address
+        push    {r1, r2, r3, lr}
+        mov     r0, ip
+        bl      c4_unmap3
+        mov     r0, r11
+        bl      c4_map3
+        str     r1, [sp, #HF + GVA]
+        bfc     r11, #0, #12
+        str     r11, [sp, #HF + GPA]
+        pop     {r1, r2, r3, lr}
+        cmp     r0, #0
+        bne     c4_g41
+        b       c4_g50                  @ not mapped: on to the next region
+
+@ from the end of c4_gfx (bl): unmap the window if one is left
+        .global c4_hdone
+c4_hdone:
+        ldr     r0, [sp, #GVA]
+        cmp     r0, #0
+        bxeq    lr
+@ r0 = window base: unmap its three pages, the last one first. Keeps r4-r11.
+c4_unmap3:
+        push    {r4, lr}
+        mov     r4, r0
+        add     r0, r4, #0x2000
+        bl      __kunmap_atomic
+        add     r0, r4, #0x1000
+        bl      __kunmap_atomic
+        mov     r0, r4
+        bl      __kunmap_atomic
+        pop     {r4, pc}
+
+@ r0 = physical address: map its page and the next two. r0 = the address in the window, r1 = window base; both 0
+@ (nothing left mapped) if the three slots were not consecutive. Keeps r4-r11.
+c4_map3:
+        push    {r4, r5, r6, lr}
+        mov     r4, r0
+        lsr     r5, r0, #12
+        mov     r0, r5
+        bl      kmap_atomic_pfn
+        mov     r6, r0
+        add     r0, r5, #1
+        bl      kmap_atomic_pfn
+        add     r0, r5, #2
+        bl      kmap_atomic_pfn
+        sub     r0, r0, r6
+        cmp     r0, #0x2000
+        bne     1f
+        ubfx    r0, r4, #0, #12
+        add     r0, r0, r6
+        mov     r1, r6
+        pop     {r4, r5, r6, pc}
+1:      mov     r0, r6
+        bl      c4_unmap3
+        mov     r0, #0
+        mov     r1, #0
+        pop     {r4, r5, r6, pc}
+
+@ ---- L5 while paused. During a pause (or on a repeated frame) VDP_Routine runs every vsync but skips the Dolby
+@ processing, so nothing would widen L5 for graphics shown then (the disc's pause bar, the player's info bar): the TV
+@ keeps the last frame's metadata. c4_l5 keeps each frame's offsets before widening (c4_gfxs, in the metadata buffer
+@ at PST: magic, the 8 bytes, fresh); c4_copy (any parsed frame) and c4_fixed overwrite the magic first, so it is
+@ valid only for a frame that went through c4_l5.
+        .equ    PMAGIC, 0x50354c44      @ "DL5P"
+
+@ from c4_l5 (bl, in place of c4_gfx): r0 = the L5 offsets, r4 = the metadata buffer
+        .global c4_gfxs
+c4_gfxs:
+        add     ip, r4, #(PST & 0xff00)
+        add     ip, ip, #(PST & 0xff)
+        movw    r1, #:lower16:PMAGIC
+        movt    r1, #:upper16:PMAGIC
+        str     r1, [ip]
+        mov     r2, #0
+1:      ldrb    r1, [r0, r2]
+        add     r3, ip, r2
+        strb    r1, [r3, #4]
+        add     r2, r2, #1
+        cmp     r2, #8
+        bne     1b
+        mov     r1, #1
+        strb    r1, [ip, #12]           @ fresh: a new frame since the last vsync
+        b       c4_gfx
+
+@ ---- the OSD's screen saver (paused or stopped for a while: a moving logo on black): its state at c4_pla + 0x164,
+@ 2 off, 1 starting, 0 up, 3 ending (the driver itself takes 0 and 3 for up). r0 = 1 while up; keeps r1-r12.
+c4_ssnow:
+        push    {r1, lr}
+        bl      c4_lits
+        ldr     r0, [r0, #12]           @ c4_pla = _arOsdPlaneInfo
+        ldr     r0, [r0, #0x164]
+        cmp     r0, #3
+        cmpne   r0, #0
+        moveq   r0, #1
+        movne   r0, #0
+        pop     {r1, pc}
+
+@ ---- 5: from Dovi_Core3_HalSetRawMetadata (b): while the screen saver is up the L5 block is cut out of what goes
+@ to the HDMI side: without L5 the TV neither blanks around the moving logo nor applies positive lift, so the
+@ saver's black stays black. Notes in the pause stash whether it did (c4_pause). Then c4_send. r6 = the metadata
+@ buffer (always a whole one: also the mute path's copy), r5 = bytes of blocks copied, [r8] = sw registers (length
+@ u16 at +0x91), [r8 + 0x120] = out buffer (block count at +0x45, blocks from +0x46); r0-r4 ip free.
+        .global c4_sendx
+c4_sendx:
+        bl      c4_ssnow
+        add     ip, r6, #(PST & 0xff00)
+        add     ip, ip, #(PST & 0xff)
+        strb    r0, [ip, #13]
+        cmp     r0, #0
+        beq     c4_send
+        ldr     r0, [r8, #0x120]
+        add     r1, r0, #0x46           @ r1 = a block
+        add     r2, r1, r5              @ r2 = end of the blocks
+        ldrb    r3, [r0, #0x45]
+1:      subs    r3, r3, #1
+        blt     c4_send                 @ no L5
+        ldrb    r4, [r1, #2]
+        ldrb    ip, [r1, #3]
+        orr     ip, ip, r4, lsl #8
+        add     ip, ip, #5              @ ip = the block's size (length, level, payload)
+        ldrb    r4, [r1, #4]
+        cmp     r4, #5
+        addne   r1, r1, ip
+        bne     1b
+        add     r4, r1, ip
+2:      cmp     r4, r2                  @ the blocks after it move down
+        ldrblo  r3, [r4], #1
+        strblo  r3, [r1], #1
+        blo     2b
+        sub     r5, r5, ip
+        ldrb    r3, [r0, #0x45]
+        sub     r3, r3, #1
+        strb    r3, [r0, #0x45]
+        ldr     r0, [r8]
+        ldrh    r3, [r0, #0x91]
+        sub     r3, r3, ip
+        strh    r3, [r0, #0x91]
+        b       c4_send
+
+@ ---- 8: VDP_Routine 0x7e9b3518 "bl VDP_HalSetupSoftwareRegister" -> bl c4_pause. Every vsync, in the VDP thread
+@ (MutexVDP held), before that vsync's Dolby processing. If TV-led Dolby Vision runs (DOVI_Process on, now and
+@ before: [ctx+4] = 3; stash valid) and no frame came since the last vsync, the offsets are widened again for the
+@ graphics shown now; if L5 changes, the metadata buffer goes to core3 again like a frame's (get_md_len,
+@ i4Dovi_Core3_MetaData_Update), and the TV gets it at the next vsync. While the screen saver is up nothing is
+@ widened; it is sent once when the saver comes up (then without L5, c4_sendx) and once when it goes.
+        .global c4_pause
+c4_pause:
+        push    {r0, r1, r2, r3, r4, r5, r6, lr}
+        sub     sp, sp, #16
+        bl      c4_lits
+        ldr     r0, [r0, #8]            @ c4_ctx
+        ldr     r1, [r0, #4]
+        cmp     r1, #3
+        bne     9f
+        ldr     r4, [r0, #0x60]         @ the metadata buffer core3 is given
+        cmp     r4, #0
+        beq     9f
+        add     r5, r4, #(PST & 0xff00)
+        add     r5, r5, #(PST & 0xff)
+        ldr     r1, [r5]
+        movw    r2, #:lower16:PMAGIC
+        movt    r2, #:upper16:PMAGIC
+        cmp     r1, r2
+        bne     9f
+        ldrb    r1, [r5, #12]
+        cmp     r1, #0
+        movne   r1, #0
+        strbne  r1, [r5, #12]
+        bne     9f                      @ a frame came: it was widened then
+        bl      c4_ssnow
+        ldrb    r1, [r5, #13]           @ 1: the last send went without L5 (screen saver)
+        cmp     r0, #0
+        beq     3f
+        cmp     r1, #0
+        beq     5f                      @ the saver has come up: send once, without L5 (c4_sendx)
+        b       9f                      @ nothing follows the saver's moving logo
+3:      ldrb    r1, [r4, #0x46]
+        add     r6, r4, #0x47
+1:      subs    r1, r1, #1              @ r6 = the L5 slot
+        blt     9f
+        ldrb    r2, [r6, #4]
+        cmp     r2, #5
+        addne   r6, r6, #0x13
+        bne     1b
+        ldr     r0, [r5, #4]
+        ldr     r1, [r5, #8]
+        stm     sp, {r0, r1}
+        mov     r0, sp
+        bl      c4_gfx
+        mov     r2, #0
+        mov     r3, #0
+2:      ldrb    r0, [sp, r3]            @ new offsets into the slot; r2 = changed
+        add     r1, r6, r3
+        ldrb    ip, [r1, #5]
+        cmp     r0, ip
+        strbne  r0, [r1, #5]
+        movne   r2, #1
+        add     r3, r3, #1
+        cmp     r3, #8
+        bne     2b
+        ldrb    r1, [r5, #13]
+        orrs    r2, r2, r1
+        beq     9f                      @ L5 unchanged, and it was in the last send
+5:      mov     r0, r4
+        bl      get_md_len
+        mov     r1, r0
+        mov     r0, r4
+        bl      core3_md_update
+9:      add     sp, sp, #16
+        pop     {r0, r1, r2, r3, r4, r5, r6, lr}
+        b       vdp_setup_sw

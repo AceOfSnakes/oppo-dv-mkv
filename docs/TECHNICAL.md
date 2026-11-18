@@ -27,6 +27,7 @@ The hardware is a MediaTek MT8581 (4× Cortex-A9) running Linux 3.10.
 | ALAC decoder of firmware 56/60 (v1.7.0) | `/res/bdpaudec.db` (symlink swapped by the boot wrapper) | `install.sh` builds it | `src/audio/alacdec.bin` |
 | Better subtitles | running `bdpprog.1` + `liblp.so` (RU 65-0131 program) | `subs.sh` | `src/subtitles/` |
 | Factory menu shortcut | running `bdpprog.1` (RU 65-0131 or jb_overlay V3 program) | `fpage.sh` | `src/factory-menu/` |
+| Setup > Extras page (v2.1.2) | running `bdpprog.1` (RU 65-0131 program family), 64 KiB mapped at `0x01b80000` + 4 code halfwords | `xtmenu.sh` | `src/setupmenu/` |
 
 The patchers are idempotent (`on` when already on does nothing) and reversible (`off`). They verify every patch
 site before writing, and they write the code blob before redirecting any call into it.
@@ -808,7 +809,7 @@ Tested with the script on every driver image and the stub's 48-case truth table 
 
 The patch does not bring back a menu that is already black: the next stop does.
 
-## Part 2c-4: bdpdrv1 (TV-led Dolby Vision metadata: CM 2.9, CM 4.0, L5, `dvcm.sh`, v2.0.0)
+## Part 2c-4: bdpdrv1 (TV-led Dolby Vision metadata: CM 2.9, CM 4.0, L5, `dvcm.sh`, v2.0.0; v2.1.2)
 
 Addresses are bdpdrv1 virtual addresses (module at `0x7e8d3000`), data addresses those of the RU build.
 
@@ -861,10 +862,11 @@ behind the stock blocks in the HDMI writer:
 | `c4_reset` | `0x7eb4834c` | `4a00c5e5` | `dm_data_payload_read`, where the block count is stored: clears the stash for this RPU |
 | `c4_ext` | `0x7eb48630` | `4a30d2e5` | unknown level in the first list: reads the block if it is one of the six, then the stock skip |
 | `c4_list2` | `0x7eb48354` | `140094e5` | at the function's return: reads the second list if at least 8 bits are left |
-| `c4_copy` | `0x7eb43eb0` | `f08fbde8` | return of the struct converter: copies the stash from the payload struct to the metadata buffer |
-| `c4_fixed` | `0x7eb55134` | `2a0300eb` | `control_path_main` calling `get_fixed_metadata` (metadata the driver generates): no blocks of ours |
-| `c4_send` | `0x7eb3ece0` | `d020c7e1` | `Dovi_Core3_HalSetRawMetadata` after its copy loop: appends the stash, raises the block count and the length; nothing if it would pass 0x200 bytes |
+| `c4_copy` | `0x7eb43eb0` | `f08fbde8` | return of the struct converter: copies the stash from the payload struct to the metadata buffer (16 bytes more since v2.1.2: they overwrite the pause stash's magic, see below) |
+| `c4_fixed` | `0x7eb55134` | `2a0300eb` | `control_path_main` calling `get_fixed_metadata` (metadata the driver generates): no blocks of ours, no pause stash |
+| `c4_send` | `0x7eb3ece0` | `d020c7e1` | `Dovi_Core3_HalSetRawMetadata` after its copy loop: appends the stash, raises the block count and the length; nothing if it would pass 0x200 bytes. Since v2.1.2 the hook goes to `c4_sendx` first (screen saver, below) |
 | `c4_l5` | `0x7eb5512c` | `9a0300eb` | `control_path_main` calling `update_md_for_hdmi`: runs it, then rewrites L5 (below) |
+| `c4_pause` | `0x7e9b3518` | `6165ffeb` | `VDP_Routine` calling `VDP_HalSetupSoftwareRegister`, every vsync: L5 again while paused (below), then that call |
 
 ### L5 for the output frame
 
@@ -896,31 +898,77 @@ Up to v2.1.0-beta the stub took the bitmap size for the window, found that windo
 skipped it, so those subtitles in the bars were blanked by the TV. Every enabled plane, up to four
 regions each, is sampled at every 8th pixel of every 4th row, only in rows and columns outside the active area;
 a pixel with alpha widens that side, with one sampling step of margin. A region in another format counts as drawn
-as a whole. Bitmaps and palettes are read through the kernel's linear mapping (physical + `0x80000000`) and only
-between physical `0x100000` and `0x3f000000`; `dvcm.sh` checks that mapping in the page tables. About half a
-million instructions per frame with two empty planes and 2.40:1 bars.
+as a whole. Bitmaps and palettes between physical `0x100000` and `0x3f000000` are read through the kernel's linear
+mapping (physical + `0x80000000`); `dvcm.sh` checks that mapping in the page tables. About half a million
+instructions per frame with two empty planes and 2.40:1 bars.
+
+A disc's own graphics (its BD-J program: pause bar, pop-up menus) are on plane 1, one 1920×1080 ARGB8888 surface,
+double-buffered, in the reserved "ch3" memory (kernel `drvmem_base_ch3` / `drvmem_size_ch3` at `0x805b3860`:
+physical `0x40000000`, 40 MB) above the linear map. The driver maps each surface on its own
+(`_OsdCreateBitmap_ByPlane`, ioremap, write-back cached), with no fixed offset. Up to v2.1.1-beta the stub skipped
+such a region, so the TV blanked those graphics in the bars. Since v2.1.2 a window outside the linear map is read if
+it lies inside ch3: per sampled row, the row's page and the next two are mapped with the kernel's `kmap_atomic_pfn`
+(`0x800179c4`; `__kunmap_atomic` `0x800177e4`; the same kernel on every player we have). In this 3.10 kernel nested
+`kmap_atomic` calls take consecutive fixmap slots, so the three pages are one 12 KB window (a row is at most 7680
+bytes); the stub checks that the third slot is two pages after the first. Rows that lie all inside the active area
+are not mapped. 210 mappings per frame with 2.40:1 bars (810 pillarboxed); no measurable CPU load (the player was
+22 % busy during a UHD disc's playback with and without it). This code lives in a second cave, `rpu_payload_dump`
+(`0x7eb45298`, an RPU dump routine of the same Dolby debug code, no caller, 3432 bytes to the end of its page),
+together with the "drawn as a whole" fallback moved out of the first cave.
+
+### While paused
+
+`VDP_Routine` (a kernel thread woken at every vsync, holding `MutexVDP`) calls `DOVI_Process` only for a new frame.
+While paused nothing processes the metadata, the TV keeps the last frame's, and graphics that appear then (the
+disc's pause bar, the player's pause icon and info bar) stayed blanked in the bars, in every version since v2.0.0.
+Since v2.1.2 `c4_l5` keeps each frame's offsets before widening in the metadata buffer at `+0x1290` (magic `DL5P`,
+the offsets, a "fresh" byte; `c4_copy` and `c4_fixed` overwrite the magic first, so it is valid only for a frame
+that went through `c4_l5`). `c4_pause` runs at every vsync, before that vsync's Dolby processing. If `DOVI_Process`
+is on (Dolby context `+4` = 3: on now and before; 0 after stop), the stash is valid and no frame came since the last
+vsync, it widens the kept offsets again for what the planes show now and, only if L5 changes, hands the buffer
+(Dolby context `+0x60`) to core3 again as for a frame: `get_md_len`, `i4Dovi_Core3_MetaData_Update`. Core3 sends
+what `Dovi_Core3_HalSetRawMetadata` copied once the 0x30 bits of `_pDoviCore3Mode` are set; writing the raw buffer
+alone changes nothing. While paused this costs no measurable CPU (0.4 % busy).
+
+The player's screen saver (after some minutes paused: an opaque black full-screen region on plane 1, a 32×16
+bitmap scaled up, and the moving logo, 682×116 on plane 0) would make that follow the logo: in a scene with lift
+the TV raises the black of the bar around it, a rectangle wandering with the logo. Its state is the OSD's own,
+`_arOsdPlaneInfo` (the stub's `c4_pla`) `+0x164`: 2 off (also at boot), 1 starting, 0 up, 3 ending; the driver
+itself takes 0 and 3 for up. While it is up `c4_pause` widens nothing; it sends once when the saver comes up and
+once when it goes. `c4_sendx`, in `Dovi_Core3_HalSetRawMetadata` before `c4_send`, then cuts the L5 block out of
+the raw buffer (later blocks moved down, block count and length lowered) and notes in the pause stash that it did.
+Without L5 the TV maps the whole frame the same way: on the LG C1 the bars and the picture area read the same
+(5/8/4 of 255 in the TV's own screen grab, before: 0 in the bars, 5/8/4 inside).
 
 ### The script
 
-The stub is 2148 bytes in `parse_cmd_line_option` (`0x7eb53688`, 2384 bytes), a command line parser of the Dolby
-control path's test harness with no caller in the driver. All the code above is at the same addresses in every
-driver build we have; the data is not (RU 0, USA `+0x90`, a third build `+0x50`, CXUHD `−0x8`), and inside the cave
-function only the first 2176 bytes are the same everywhere, which is why the stub must stay below that. The stub's
-last six words are its data addresses. `dvcm.sh` reads them from literal pools of the driver's own code
+The stub is 2128 bytes in `parse_cmd_line_option` (`0x7eb53688`, 2384 bytes), a command line parser of the Dolby
+control path's test harness with no caller in the driver, and 952 bytes in `rpu_payload_dump` (cave 2). All the code
+above is at the same addresses in every driver build we have; the data is not (RU 0, USA `+0x90`, a third build
+`+0x50`, CXUHD `−0x8`), and inside the first cave function only the first 2176 bytes are the same everywhere, which
+is why the stub must stay below that; the script always writes and restores all 2176 (the stub, then the function's
+own bytes), so `off` is exact also over an earlier version. The stub's last six words are its data addresses. `dvcm.sh` reads them from literal pools of the driver's own code
 (`_OSD_PLA_GetEnable`, `VDP_HalGetFbAtIsrW`, `dovi_set_out_res`, `OSD_PLA_GetFirstRegion`, `OSD_RGN_LIST_GetHead`,
 `OSD_RGN_GetAdd`) and requires all six to be moved by the same amount.
 
 Checked before anything is written: the words around every site, the first words of every function and join the
 stub branches to, the instructions that load the six addresses and the region header getters (field offsets), the
-kernel's linear mapping, every site (stock or hooked) and the cave (stock or this stub). A driver with hooks into
-the cave and other cave contents is another version of this patch (`other`): `on` first restores stock. `on` writes
-the cave, then the hooks (the reset hook last, without it the others find no magic and do nothing), then the three
-CM 2.9 words; `off` goes the other way and restores the cave. `build.sh` assembles `dvcm.S`, compares it with the
-hex in the script plus the RU addresses, checks the hook words against the stub's symbols and that it fits.
+kernel's linear mapping, every site (stock or hooked) and both caves (stock or this stub). The kernel functions cave
+2 calls or relies on (`kmap_atomic_pfn`, `__kunmap_atomic`, `get_drvmem_ch3_mem` for the ch3 globals' addresses)
+are checked by their bytes; with any other kernel cave 2 goes in with `c4_hiset`'s first word a branch to "skip the
+region" (graphics outside the linear map not read, as up to v2.1.1) and `check` says so. A driver with hooks into
+either cave and other cave contents is another version of this patch (`other`): `on` first restores stock. `on` writes
+cave 2, cave 1, then the hooks (reset next to last, without it the others find no magic and do nothing; the vsync
+hook last), then the three CM 2.9 words; `off` goes the other way and restores both caves. `build.sh` assembles
+`dvcm.S`, compares both caves with the hex in the script plus the RU addresses, checks the hook words against the
+stub's symbols and that each part fits.
 
-Tested: the script on every driver image; on each patched image the L5 code in an emulator (28 cases) and the
-parser, converter and HDMI writer on every RPU of a CM 4.0 file against `dovi_tool`'s decode; on the RU player
-against the TV's own player (README, Tests).
+Tested: the script on every driver image (also over the previous version, and back to a byte-identical stock image);
+on each patched image the L5 code in an emulator (55 cases, with ch3 bitmaps behind an emulated `kmap_atomic_pfn`
+that really maps and unmaps each page, so any read outside a live mapping faults, plus 18 cases of the pause path
+and the screen saver) and the parser, converter and HDMI writer on every RPU of a CM 4.0 file against `dovi_tool`'s
+decode, also with the screen saver up (the same blocks without L5); on the RU player against the TV's own player
+(README, Tests).
 
 ## Part 2d: audio DSP decoders (`bdpaudec.db`, v1.7.0)
 
@@ -1122,6 +1170,55 @@ functions, the classifier and name code, the jailbreak's `play_by_index` and ISO
 patched bytes at every site and a zero (or this hook's) code area before writing. `dlnaiso.sh --boot` (from
 `dvmkv.sh`) starts the server, mounts `/mnt/dlnaiso`, writes `/tmp/dlnaiso.sh` (what the hook runs) and turns the
 hook on.
+
+## Part 8: Setup > Extras page (`xtmenu.sh`, `xtload.bin`, `xtmenu.bin`, v2.1.2)
+
+Addresses: the RU 65-0131 player program and its jailbreak copies (same main code); `xtmenu.sh check` compares
+fingerprints of every function, table and descriptor used (file offset, length, md5) before anything is written.
+
+**Setup's menus.** The Setup app (handle at `0x01345120`, globals at `0x0134512c`) builds its pages with BBK's
+table-driven `wgl_menu` widget (type `0x3cf`). The category list is the descriptor at `0x0126aed4` (0x38 bytes: menu
+id, style, content type, item height / width / gap / count, items of 0x14 bytes with column data and a sub-descriptor,
+columns, rows per page, runtime pointer). Callbacks are registered per menu id and event (table `0x012552a4`,
+registry `0x012a6a68`, `menu_reg_cb_entries` `0x0066e08c`): 0 select, 1 pre-create, 2 highlight, 3 get focus,
+4 lose focus. Setup's message handler (`0x00824120`) runs Oppo's own key layer first (`0x0003f260` down, `0x0003f880`
+up, `0x0003ffc8` right / OK on a row that opens something, `0x0004026c` left), which keeps the rows in its own bytes
+(`0x0134756f` category, `0x01347576` page row, `0x01347578` option row), computes where the highlight bar goes
+(`0x00823fa0` into `0x012388ec`) and has Setup's message 7 move the focus (`0x0134799f`: 5 into a page, 6 into an
+option list).
+
+**Loading.** `xtmenu.sh on` (from `dvmkv.sh`) uses a 156-byte loader stub in the jailbreak's free `.text1` tail
+(`0x01c07b00`), reached through the `usleep` GOT slot like the [boot message](#part-6-boot-message-bootmsgsh-bootmsgbin-v210):
+it maps 64 KiB RWX at `0x01b80000` (unused gap between the program's `.bss` and `.text1`; `xtmenu.sh` reads the
+maps file first and refuses if anything is there), copies `xtmenu.bin` there and runs its init once. The init only
+works on memory: it reads `options.txt`, builds the page and option-list descriptors (Playback Setup's columns and
+Auto Play Mode's list columns reused), registers their callbacks (ids `0x1f0`..`0x1f7`, unused), points the category
+list's events 0, 2 and 3 at wrappers and Setup's message handler (its app record + 0xd0) at a jump stub, then sends
+Setup a message. Widgets are changed only in the Setup thread (a change from another thread deadlocked with a
+repaint): there the row is inserted before Exit (`0x10003030`), Oppo's two 7-row limits in the key layer are
+patched to 8 (`cmp r1,#5` at `0x0003f2b2`, `movs r2,#6` at `0x0003f8ea`; the box reset at `0x00840516`), the list
+shows 8 rows, and the category box (a fixed 484x632 bitmap, Setup image 107) is drawn from a stretchable template
+of the same bitmap (`c_wgl_img_tpl_create` `0x006aecb4`) one row taller. Every other message jumps on to Oppo's
+handler.
+
+**The callbacks** copy Oppo's: the page those of Playback Setup (styles, help line, hints, the frame `G+0x3c`, the
+line under the category), the option lists those of Auto Play Mode. One rule matters: a page creates the option list
+of its highlighted row at once, hidden (`wgl_menu` `0x00669f68`, style bit `0x10000000`), also while it is getting the
+focus. The lists' pre-create and focus callbacks therefore only set the check mark (`0x10003021`), never a
+highlight, as Oppo's do (`0x0084e754`, `0x0084ea20`); Setup highlights the row when the list really opens. A
+highlight there ran the list's highlight callback with the shared "just got the focus" flag (`0x013464c4+0x26`) still
+set, and the page then kept the frame of an option list and the bar on the category.
+
+**Saving and switching.** A chosen value rewrites `options.txt` (each option's `key = value` line replaced, missing
+ones added at the end, other lines kept; written to `options.txt.tmp`, `fsync`, `rename`). `dv_mkv` and `dv_l5` are
+switched in the running patches at once; `xtmenu.sh` hands over where: `dvhook.sh dvaddr` (a flag byte in dvhook's
+state in liblp, offset 0x48: 1 = the MKV hook leaves the file to the player, as `dvhook.sh dv off` does) and
+`dvcm.sh l5pa` (the physical address of the one instruction in dvcm's driver stub that keeps L5: `sub r3,r2,#6`,
+`0xe2423006`; Oppo's `sub r3,r2,#5`, `0xe2423005`, drops it, as `dvcm.sh l5 off` does; written through `/dev/mem`
+only when one of the two values is there). The other options are read at boot as before.
+
+Strings: the page's own texts are in the code (English); On and Off are Oppo's strings 1553 / 1554 of `osdmsg.bin`
+(table `0x01a55cd4`, `[id * 12 + language]`), so they follow the menu language.
 
 ## Player program layouts
 

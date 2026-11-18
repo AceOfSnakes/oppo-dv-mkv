@@ -31,6 +31,8 @@ n=0; until grep -q liblp.so /proc/$P/maps 2>/dev/null; do
 done
 log "player ready"
 [ -f $D/dvhook.sh ] && run dvhook "Dolby Vision MKV/MP4" sh $D/dvhook.sh on   # MKV Dolby Vision signalling (liblp)
+# dv_mkv = off: no Dolby Vision from MKV (the player's own way); everything else dvhook does stays
+[ -f $D/dvhook.sh ] && [ "$(opt dv_mkv)" = off ] && run dvhook "DV MKV off" sh $D/dvhook.sh dv off
 # native_25p, the liblp half: tell the player which MKV/MP4 videos are progressive (it takes HD 25/30 fps for interlaced)
 [ -f $D/dvhook.sh ] && [ -f $D/vidopt.sh ] && [ "$(sh $D/vidopt.sh get native_25p $D/options.txt)" = on ] \
   && run video "25p/30p" sh -c "sh $D/dvhook.sh scan on | grep -v '^sites='"
@@ -40,6 +42,7 @@ log "player ready"
 [ -f $D/arflag.sh ] && run arflag "SD 4:3/16:9 flag" sh $D/arflag.sh on   # 4:3 / 16:9 flag of SD pictures in Source Direct (kernel)
 [ -f $D/dvexit.sh ] && run dvexit "DV exit" sh $D/dvexit.sh on            # Dolby Vision left on after playback, black menu (kernel)
 [ -f $D/dvcm.sh ] && run dvcm "DV metadata" sh $D/dvcm.sh on              # TV-led Dolby Vision: CM 2.9 / CM 4.0 metadata lost on the way to the TV (kernel)
+[ -f $D/dvcm.sh ] && [ "$(opt dv_l5)" = off ] && run dvcm "L5 off" sh $D/dvcm.sh l5 off   # dv_l5 = off: no L5 to the TV, Oppo's way
 if [ -f $D/hvccfix.sh ]; then   # MKVs whose hvcC has no VPS/SPS/PPS (kernel); DV is signalled for them only once it is on
   run hvccfix "hvcC" sh $D/hvccfix.sh on && run dvhook "hvcC" sh $D/dvhook.sh hvcc on
 fi
@@ -55,6 +58,12 @@ fi
 if [ -f $D/dlnaiso.sh ]; then                                             # DLNA disc images (server + player hook)
   if [ "$(opt dlna_iso)" = off ]; then log "dlnaiso: off (dlna_iso = off)"
   else run dlnaiso "DLNA ISO" sh $D/dlnaiso.sh --boot; fi
+fi
+# the "Extras" page in Setup (the options above, changed on the player): before the boot message, which uses the same
+# usleep hook for a moment. setup_extras = off leaves Oppo's Setup menu as it is.
+if [ -f $D/xtmenu.sh ]; then
+  if [ "$(opt setup_extras)" = off ]; then log "xtmenu: off (setup_extras = off)"
+  else run xtmenu "Setup page" sh $D/xtmenu.sh on "$VERSION"; fi
 fi
 # boot message: what loaded, in the player's own tip popup. A failure is always shown; "all loaded" unless
 # boot_message = off. In the background: it waits until the popup has gone again (about 10 s).

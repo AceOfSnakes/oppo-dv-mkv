@@ -24,8 +24,10 @@ struct st {
     u8 scanon;       /* 1 = tell the player (dvhook.sh scan on; the native_25p option) */
     u8 vprog;        /* prog of the file being started (dv_decide) */
     u32 progp;       /* parser that set prog */
+    u8 dvoff;        /* 1 = Dolby Vision from MKV off (dvhook.sh dv off; the dv_mkv option): the player's own way */
 };
 _Static_assert(__builtin_offsetof(struct st, prog) == 0x41 && __builtin_offsetof(struct st, progp) == 0x44, "mp4.c DV_PROG");
+_Static_assert(__builtin_offsetof(struct st, dvoff) == 0x48, "mkinstall.py DVOFF");
 #define ST(base) ((volatile struct st *)((base) + ST_VA))
 
 typedef u64 (*getlen_t)(void *, u8 *);
@@ -79,7 +81,7 @@ u32 dv_decide(u8 *proxy, u32 base) {
     s->active = 0;
     s->hits++;
     s->vprog = s->scanon && s->progp == (u32)p ? s->prog : 0;
-    if (!s->have || s->parser != (u32)p) return 0;
+    if (!s->have || s->parser != (u32)p || s->dvoff) return 0;
     u8 prof = s->rec[2] >> 1, lvl = ((s->rec[2] & 1) << 5) | (s->rec[3] >> 3);
     u8 rpu = (s->rec[3] >> 2) & 1, el = (s->rec[3] >> 1) & 1, bl = s->rec[3] & 1;
     u8 *mi = *(u8 **)(p + P_MINFO);
