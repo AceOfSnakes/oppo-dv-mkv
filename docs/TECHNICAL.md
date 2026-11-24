@@ -28,6 +28,7 @@ The hardware is a MediaTek MT8581 (4× Cortex-A9) running Linux 3.10.
 | ALAC decoder of firmware 56/60 (v1.7.0) | `/res/bdpaudec.db` (symlink swapped by the boot wrapper) | `install.sh` builds it | `src/audio/alacdec.bin` |
 | Better subtitles | running `bdpprog.1` + `liblp.so` (RU 65-0131 program) | `subs.sh` | `src/subtitles/` |
 | Factory menu shortcut | running `bdpprog.1` (RU 65-0131 or jb_overlay V3 program) | `fpage.sh` | `src/factory-menu/` |
+| ISO files under Music (v2.2.0, Part 1g) | running `bdpprog.1` (RU 65-0131 program family with the ISO player) | `isomusic.sh` | `src/isomusic/` |
 | Setup > Extras page (v2.1.2) | running `bdpprog.1` (RU 65-0131 program family), 64 KiB mapped at `0x01b80000` + 4 code halfwords | `xtmenu.sh` | `src/setupmenu/` |
 
 The patchers are idempotent (`on` when already on does nothing) and reversible (`off`). They verify every patch
@@ -314,6 +315,18 @@ u32 LE 8, u32 BE length, then TrueType). `src/subtitles/mkfont.py` builds the sh
 glyphs, and the 2,027 Big5 level-1 characters missing from `font.bin` copied from `font_sub.bin` (scaled from 256 to
 1024 units per em and matched on a shared character). The boot wrapper swaps it into `/res` when its md5 matches.
 
+## Part 1g: player program, ISO files under Music (v2.2.0)
+
+`libplb` classes files by extension (table 0x11dd124, 0x53 entries of 20 bytes; class 2 audio, 4 photo, 8 video; type
+0x53 = ISO at 0x11dd728). The jailbreak sets the ISO class to 8. A folder node (+0x78 file list, record +0 class, +0x24
+name, +0x20 next; counts +8 audio, +10 video) keeps the class each file had when the folder was scanned, and sorts by exact class, so
+0xA does not work: the file would be dropped. `isomusic.sh` sets the ISO class word, and the records and counts of the opened
+folder, to 2 for a Music list and to 8 otherwise, at two places: `_plb_set_current_dir_folder` 0x161f34 `bl _plb_lock`
+(the player's browser; class in r6, node at `[sp,#16]`) and `_plb_get_media_file_info` 0x160cee (phone apps; class mask
+r7, filter flag sl). The browser's sorted list is built per class, so an ISO is in both. The code is in four wrapper
+functions turned into tail jumps (0x156224, 0x15624c, 0x156288, 0x1562ba). Opening an ISO goes by type (jailbreak
+0x1c02d78), not by class.
+
 ## Part 1f: liblp.so, MKV language list and forced subtitles (v2.2.0)
 
 `CLpMkvParser::mrParseTrackEntry` stores a track only at the end of its TrackEntry: audio records 0xa0 each at
@@ -341,7 +354,7 @@ subtitle records, counters, the last Subtitle Language value. `dvhook.sh mkv` pr
 | player program: pointers to "SDDS" at 0x7d99dc, 0x7da328, 0x7df664 (front display), 0x8f4300 (`FUN_008f4100`, audio text), 0xa72e50 (IP control or front display, not told apart); 0x100f7a0 = entry 8 of the long-press Info panel's table (0x100f780, by code), a filler "LPCM"; `osdmsg.bin` string 936 in the RAM table 0x1a55cd4 (12 pointers, the info bar and audio menu) | "SDDS" | "Dolby Atmos" (ASCII at liblp 0x757cd8, UTF-16 at 0x757ce4, bss slack); written by `dvhook.sh on` only after the program check and when each word still holds its stock value; string 936's pointers are saved to `/tmp/dvhook-s936.bin` for `off` |
 | 0x4e7fb4 `bl mrMapPBACodeMode` (`CLpMpcWrapper::vMsgAElmStrmCallback`: the audio the decoder reports, the long-press Info panel) | decoder type 6 = 0xb, "MLP" | `k_aelm` → `mkv_aelm`: while an MKV plays on this wrapper, `mkv_thd` of its current audio record |
 | MKV proxy vtable: `mrStop` 0x6de630, `mrUnInit` 0x6de614, destructor 0x6de608 + GOT 0x6ead24 | | `k_stop`, `k_uninit`, `k_dtor` → `mkv_dtor`: forget the proxy `mkv_start` noted (it is not destroyed on stop), so that nothing but a playing MKV is renamed. DVD-Audio MLP not tested |
-| 0x3d68f8 `bl mrMkvSetStreamInf` (`mrOnStateSettingFileInfo`) | | `k_start` → `mkv_start`: reads Subtitle Language and the OSD language from the player program (`a_cfg_get_subtitlelanguage` 0x7ba644 / `a_cfg_get_osdlanguage` 0x7ba3b8, Thumb, acfg items 0x3a / 0x37; values are indexes of the 10-byte ISO 639 table at 0x1252068, entry = index, index, 3 letters, 2 letters, `_`; English 0x7e, Off 0x1e4, Auto 0x1e5, OSD Traditional Chinese 0x1e6). `dvhook.sh on` stores these three addresses only after checking 16 bytes of each getter and the English entry (RU 65 program family); otherwise the start stays stock. Armed with Auto, or with `forced_subs` and a language |
+| 0x3d68f8 `bl mrMkvSetStreamInf` (`mrOnStateSettingFileInfo`) | | `k_start` → `mkv_start`: reads Subtitle Language and the OSD language from the player program (`a_cfg_get_subtitlelanguage` 0x7ba644 / `a_cfg_get_osdlanguage` 0x7ba3b8, Thumb, acfg items 0x3a / 0x37; values are indexes of the 10-byte ISO 639 table at 0x1252068, entry = index, index, 3 letters, 2 letters, `_`; English 0x7e, Off 0x1e4, Auto 0x1e5, OSD Traditional Chinese 0x1e6). `dvhook.sh on` stores these three addresses only after checking 16 bytes of each getter and the English entry (one line per player program in `dvhook.sh`, `src/porting/findnames.py`); otherwise the start stays stock. Armed with Auto, or with `forced_subs` and a language |
 | vtable 0x6de654 `CLpMkvMediaManagerProxy::mrChangeSpStNo` | | `m_chgsp` → `mkv_chg`: when armed, the first call that switches a subtitle on (`PB_SPSTN_PARAM_T` +4 number, +5 on) is changed. Target language: Subtitle Language, for Auto the OSD language (Chinese menus: Simplified `zs`, 0x1e6 Traditional `zt`). Track keys come from the read-ahead (by track number, record → number noted in `mkv_keep`; `LanguageIETF` included), else the record's language. Exact key first, then any Chinese. `forced_subs` on: only FlagForced tracks, none → +5 = 0. Off (Auto only): the Default flag preferred, else the first match, else the player's choice |
 
 **Atmos.** `mkv_scan` notes `A_TRUEHD` tracks; with any, `thd_scan` walks the Segment from the end of Tracks to the

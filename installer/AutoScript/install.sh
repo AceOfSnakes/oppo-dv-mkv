@@ -9,7 +9,7 @@
 #   /mnt/ubi_boot/bdpprog               boot wrapper (run by the jailbreak launcher instead of bdpprog.1)
 #   /mnt/ubi_boot/bdpprog.prev          the jb_overlay boot script, if that mod was installed (the wrapper chains to it)
 #   /mnt/ubi_boot/oppo-dv-mkv/          dvmkv.sh + the installed parts: dvhook.sh, p7kel.sh, bgfix.sh, sarfix.sh, arflag.sh, dvexit.sh, dvcm.sh, hvccfix.sh,
-#                                       ftrfix.sh, mp4elfix.sh, alacdec.bin, bdpaudec.db, vidopt.sh, dlnaiso, dlnaiso.sh,
+#                                       ftrfix.sh, mp4elfix.sh, alacdec.bin, bdpaudec.db, vidopt.sh, isomusic.sh, dlnaiso, dlnaiso.sh,
 #                                       dmrhook.sh, dmrhook.bin, xtmenu.sh, xtload.bin, xtmenu.bin (Dolby Vision MKV fix),
 #                                       bootmsg.sh, bootmsg.bin (all), subs.sh,
 #                                       image_bdp83.bin, font.bin (subtitles), fpage.sh (factory menu), languages.txt (MP4/MKV language list, from
@@ -127,6 +127,7 @@ if [ -e $S/CHECKONLY ]; then
   [ -f $S/oppo-dv-mkv/mp4elfix.sh ] && echo "MP4 P7:    $($ECHECK 2>&1 | tr '\n' ' ')"
   [ -f $S/oppo-dv-mkv/alacdec.bin ] && echo "audio db:  $(m5 $DBORIG)  (ALAC decoder swap needs 0abee82b1ea7bc77d3db30907355376b)"
   [ -f $S/oppo-dv-mkv/vidopt.sh ] && echo "video options: $($VCHECK 2>&1 | tr '\n' ' ')"
+  [ -f $S/oppo-dv-mkv/isomusic.sh ] && echo "ISO under Music: $(sh $S/oppo-dv-mkv/isomusic.sh check 2>&1 | tr '\n' ' ')"
   echo "bdpprog.1: $(m5 $PLAYER)  (region player program, informative)"
   echo "running:   $RUN  (player program in use)"
   echo "subtitles: $(echo $SCK)"
@@ -212,7 +213,7 @@ if [ -z "$DV$SUBS$MENU" ] && [ -n "$MENU_NN" ] && [ -z "$IN_DV$IN_SUBS" ]; then
   HEAD="NOTHING TO INSTALL - this player does not need it. Nothing was changed."; result; exit 0
 fi
 [ -n "$DV$SUBS$MENU" ] || fail "none of the parts in this zip can be installed safely on this player"
-FILES="dvmkv.sh${BMSG:+ bootmsg.sh bootmsg.bin}${DV:+ dvhook.sh p7kel.sh bgfix.sh sarfix.sh arflag.sh dvexit.sh dvcm.sh hvccfix.sh ftrfix.sh mp4elfix.sh alacdec.bin vidopt.sh}${ISO:+ dlnaiso dlnaiso.sh dmrhook.sh dmrhook.bin}${PAGE:+ xtmenu.sh xtload.bin xtmenu.bin}${SUBS:+ subs.sh}${MENU:+ fpage.sh}"
+FILES="dvmkv.sh${BMSG:+ bootmsg.sh bootmsg.bin}${DV:+ dvhook.sh p7kel.sh bgfix.sh sarfix.sh arflag.sh dvexit.sh dvcm.sh hvccfix.sh ftrfix.sh mp4elfix.sh alacdec.bin vidopt.sh isomusic.sh}${ISO:+ dlnaiso dlnaiso.sh dmrhook.sh dmrhook.bin}${PAGE:+ xtmenu.sh xtload.bin xtmenu.bin}${SUBS:+ subs.sh}${MENU:+ fpage.sh}"
 for f in $FILES bdpprog ${SUBS:+$(for q in $SQUARES; do echo sq$q.png; done) font.bin.gz}; do
   [ -f $S/oppo-dv-mkv/$f ] || fail "missing $f on the stick (unzip the whole release)"
   grep -q " $f\$" $S/oppo-dv-mkv/MD5SUMS && [ "$(m5 $S/oppo-dv-mkv/$f)" = "$(grep " $f\$" $S/oppo-dv-mkv/MD5SUMS | cut -d' ' -f1)" ] \
@@ -225,7 +226,7 @@ put(){  # atomic copy: $1 source, $2 destination
   echo "  $2 installed"
 }
 for f in $FILES; do put $S/oppo-dv-mkv/$f $D/$f || fail "writing $D/$f"; done
-[ -z "$DV" ] && [ -e $D/p7kel.sh ] && rm -f $D/dvhook.sh $D/p7kel.sh $D/bgfix.sh $D/sarfix.sh $D/arflag.sh $D/dvexit.sh $D/dvcm.sh $D/hvccfix.sh $D/ftrfix.sh $D/mp4elfix.sh $D/alacdec.bin $D/bdpaudec.db $D/vidopt.sh && echo "  Dolby Vision MKV fix not installed now: older copy removed"
+[ -z "$DV" ] && [ -e $D/p7kel.sh ] && rm -f $D/dvhook.sh $D/p7kel.sh $D/bgfix.sh $D/sarfix.sh $D/arflag.sh $D/dvexit.sh $D/dvcm.sh $D/hvccfix.sh $D/ftrfix.sh $D/mp4elfix.sh $D/alacdec.bin $D/bdpaudec.db $D/vidopt.sh $D/isomusic.sh && echo "  Dolby Vision MKV fix not installed now: older copy removed"
 [ -z "$ISO" ] && [ -e $D/dmrhook.sh ] && rm -f $D/dlnaiso $D/dlnaiso.sh $D/dmrhook.sh $D/dmrhook.bin && echo "  DLNA disc images not installed now: older copy removed"
 [ -z "$BMSG" ] && [ -e $D/bootmsg.sh ] && rm -f $D/bootmsg.sh $D/bootmsg.bin && echo "  boot message not installed now: older copy removed"
 [ -z "$PAGE" ] && [ -e $D/xtmenu.sh ] && rm -f $D/xtmenu.sh $D/xtload.bin $D/xtmenu.bin && echo "  Setup > Extras page not installed now: older copy removed"

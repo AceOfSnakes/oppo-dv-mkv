@@ -1,0 +1,42 @@
+#!/bin/sh
+# oppo-dv-mkv: ISO files in the Music lists too (RAM patch of the player program).  usage: sh isomusic.sh on | off | status | check
+# The jailbreak lists ISO files as video, so an SACD ISO was not shown under Music. What is inside an ISO is not known
+# when a folder is listed: it is now music while a Music list is open and video in every other list. Opening a list
+# (the player's browser: _plb_set_current_dir_folder, phone apps: _plb_get_media_file_info) sets that, also for a folder
+# the player already has in its cache. Opening an ISO is unchanged (the jailbreak goes by its type).
+# Only the RU 65-0131 program with the jailbreak's ISO player (RU and USA jailbreak, jb_overlay V3, rebranded clones):
+# everything used is checked first (file offset:length:md5 of the running program), anything else is refused.
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin
+CMD=$1; PROC=${OPPODV_PROC:-/proc}
+FPS="0x14e224:200:9d673529630926897bb00ed1211dba76 0x158be0:336:6151e2e34209251c1c068de1dacdeaf9
+0x159e82:304:b3201f96b39a8bb4abb08fe29c4dbf8e 0x152fb4:76:c172cec775fd16ea1c9802f667bbd923
+0x150086:62:7b67e7b3f552489998cc784343723b14 0x14faa0:102:64ef70168094bb46d0dd0a74ed07154a
+0x1520b4:220:79a4e70fc707aaf507029d74cbcb833f 0x15279c:64:a52d59192fe4a8a8ca9ecc386a342dad
+0x127b7f8:16:9de25353e48ea18d2421547f70a94535 0x127ad78:64:57a15ce0c2447946948fc3053900b902
+0x11d5728:20:50b09bad8b5278a65e5627430cd33cbd"
+BODY="@BODY@"
+HOOKS="@HOOKS@"   # last in, first out
+P=${OPPODV_PID:-$(ps | awk '$4 ~ /(^|\/)bdpprog\.1$/{print $1; exit}')}; [ -n "$P" ] || { echo "player not running"; exit 1; }
+X=$PROC/$P/exe; M=$PROC/$P/mem
+fp(){ o=${1%%:*}; r=${1#*:}; [ "$(dd if=$X bs=1 skip=$((o)) count=${r%%:*} 2>/dev/null | md5sum | cut -d' ' -f1)" = ${r#*:} ]; }
+for f in $FPS; do fp $f || { echo "ISO files under Music: not supported on this player program"; exit 1; }; done
+rd(){ dd if=$M bs=1 skip=$(($1)) count=$2 2>/dev/null | hexdump -v -e "$2/1 \"%02x\""; }
+orig(){ dd if=$X bs=1 skip=$(($1 - 0x8000)) count=$2 2>/dev/null | hexdump -v -e "$2/1 \"%02x\""; }
+# wr ADDR HEX: in one write where the address allows it (code in use)
+wr(){ a=$(($1)); n=$((${#2} / 2)); e=$(echo $2 | sed 's/../\\x&/g'); s=2; [ $((a % 4)) = 0 ] && [ $((n % 4)) = 0 ] && s=4; [ $((n % 2)) = 1 ] && s=1
+  printf "$e" | dd of=$M bs=$s seek=$((a / s)) conv=notrunc 2>/dev/null; }
+state(){ y=0; n=0; for e in $BODY $HOOKS; do k=$(( (${#e} - 9) / 2 )); c=$(rd ${e%%:*} $k)
+    if [ "$c" = "${e#*:}" ]; then y=$((y + 1)); elif [ "$c" = "$(orig ${e%%:*} $k)" ]; then n=$((n + 1)); else echo "unexpected code at ${e%%:*}"; return 1; fi; done
+  [ $n = 0 ] && echo on || { [ $y = 0 ] && echo off || echo partly; }; }
+case "$CMD" in
+check) echo "supported";;
+status) state;;
+on) s=$(state) || { echo "$s"; exit 1; }
+  [ "$s" = on ] && { echo "already on"; exit 0; }
+  for e in $BODY $HOOKS; do wr ${e%%:*} ${e#*:}; done
+  s=$(state); [ "$s" = on ] && echo "ISO files under Music and Video: on" || { echo "failed: $s"; exit 1; };;
+off) s=$(state) || { echo "$s"; exit 1; }
+  for e in $HOOKS $BODY; do k=$(( (${#e} - 9) / 2 )); wr ${e%%:*} $(orig ${e%%:*} $k); done
+  wr 0x11dd72c 08000000; state;;
+*) echo "usage: isomusic.sh on | off | status | check"; exit 1;;
+esac

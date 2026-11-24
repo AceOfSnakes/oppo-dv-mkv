@@ -61,6 +61,7 @@ options without a USB stick (English only for now). See [Setup > Extras page](#s
 - [MP4 files (v1.8.0)](#mp4-files-v180)
 - [Video options (v2.0.2)](#video-options)
 - [Setup > Extras page (v2.1.2)](#setup--extras-page-v212)
+- [ISO files under Music (v2.2.0)](#iso-files-under-music-v220)
 - [DLNA disc images (v2.1.0)](#dlna-disc-images-v210)
 - [Boot message (v2.1.0)](#boot-message-v210)
 - [Factory menu](#factory-menu)
@@ -430,6 +431,14 @@ hides the page.
 **How:** in memory only, like every other patch: at boot the page's code is put into an unused gap of the running
 player program, and the Setup app itself adds the row and builds the page with the player's own menu widgets,
 texts and callbacks. Nothing in the firmware is changed. Details: [docs/TECHNICAL.md](docs/TECHNICAL.md), Part 8.
+
+## ISO files under Music (v2.2.0)
+
+The jailbreak lists ISO files under Video only, so an SACD image could not be found under Music. With the Dolby Vision
+MKV fix installed, an ISO is listed under **both** Music and Video and opens the same way from each (tested with an SMB share; USB and DLNA lists not tested). What is
+inside an ISO is not known while a folder is listed, so film images are shown under Music too. Under the hood an ISO counts
+as music while a Music list is open and as video in every other list. Only the RU 65-0131 program family with the
+jailbreak's ISO player (RU and USA jailbreak, jb_overlay V3, rebranded clones); elsewhere nothing changes.
 
 ## DLNA disc images (v2.1.0)
 
@@ -1322,7 +1331,9 @@ TrueHD, the track-list read-ahead also looks at the first blocks of the first cl
 major sync carries the 16-channel presentation (4 substreams) is Atmos. Such a track is handed to the menus as the
 codec code of SDDS (Sony's cinema format, which never occurs on this player and selects the same decoder setup), and
 that code's names in the player program (info bar, audio menu, front display, IP control) are pointed at "Dolby
-Atmos". Needs the RU 65-0131 player program family; elsewhere Atmos tracks keep the name "Dolby TrueHD".
+Atmos". Supported on the player programs of v65 (RU, EU, AU, CN, TW, JP, US), the RU
+and USA jailbreaks, jb_overlay V3 and the Cambridge CXUHD 66; tested on RU, the others are located by their code and checked
+before anything is written. Elsewhere Atmos tracks keep the name "Dolby TrueHD".
 
 **Fix (`dvhook.sh`).** At the start of the Tracks element the whole element is read ahead and every track's number,
 type, language, `LanguageIETF`, Default and Forced flags are noted. With a [language list](#language-list) and more
@@ -1814,6 +1825,7 @@ program if that file exists. The installer puts there:
 /mnt/ubi_boot/oppo-dv-mkv/alacdec.bin, bdpaudec.db  ALAC audio decoder of firmware 56/60 and the player's audio decoder
                                       file with it, built at install time, swapped into /res at boot
 /mnt/ubi_boot/oppo-dv-mkv/fpage.sh    factory menu shortcut (one layout per regional v65 player program; on|off|status|check)
+/mnt/ubi_boot/oppo-dv-mkv/isomusic.sh ISO files under Music in the player program (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/vidopt.sh   video options in the player program (apply|off|status|check|get)
 /mnt/ubi_boot/oppo-dv-mkv/options.txt oppo-dv-mkv-options.txt from the stick (all options); Setup > Extras writes it
 /mnt/ubi_boot/oppo-dv-mkv/bootmsg.sh, bootmsg.bin  boot message in the player's own popup (show TEXT [MS]|status|check)
@@ -1884,6 +1896,25 @@ requests.
 </p>
 
 ## Changelog
+
+- **v2.2.0-beta: text subtitles, MKV track languages, forced subtitles, Dolby Atmos name, ISO files under Music.** A
+  beta: tested on one player (RU) and one TV (LG C1).
+  - **Text subtitles:** UTF-8 `.srt` files without a BOM are read right; `<font>` and other tags are gone, `{\an8}`
+    goes to the top and italics are shown (embedded subtitles); long lines wrap, up to 4 lines; Hungarian and
+    Traditional Chinese characters missing from the player's font are there. See
+    [fix 28](#28-text-subtitles-encodings-tags-and-line-handling-v220) and the limits in
+    [Known limitations](#known-limitations).
+  - **MKV language list:** the [language list](#language-list) also chooses MKV tracks, where a file has more than the
+    player takes (10 audio, 32 subtitles). An audio track past the 10th no longer takes the place of the 10th. `ZH` /
+    `ZH-TW` tell Simplified and Traditional Chinese apart. Subtitle Language = Auto starts on the player's menu language. See
+    [fix 29](#29-mkv-language-list-and-forced-subtitles-v220).
+  - **`forced_subs`** (options file and Setup > Extras): MKV files start on the forced subtitles of the Subtitle
+    Language, or on none.
+  - **Audio names:** Dolby TrueHD in MKV was called "MLP" or "UND"; TrueHD with Atmos is called Dolby Atmos.
+  - **ISO files under Music:** in the player's browser an ISO is listed under Music as well as under Video, for SACD
+    images. RU 65-0131 program family with the jailbreak's ISO player. See [ISO files under Music](#iso-files-under-music-v220).
+  - **Setup > Extras in the player's language** (12 languages), with texts that follow the menu language.
+  - Updating adds `isomusic.sh` and `font.bin` (better subtitles), and replaces `dvhook.sh`, `dvmkv.sh`, the Extras page's files and the boot wrapper.
 
 - **v2.1.2-beta: the options on the player (Setup > Extras).** A new category, **Extras**, in the player's own Setup
   menu (between Network Setup and Exit) changes the options without a USB stick: Dolby Vision MKV, Dolby Vision L5,

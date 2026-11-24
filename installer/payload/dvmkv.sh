@@ -53,6 +53,7 @@ if [ -f $D/dvhook.sh ] && [ -f $D/languages.txt ]; then   # MP4 / MKV: which aud
   [ -n "$c" ] && run dvhook "languages" sh $D/dvhook.sh langs $c
 fi
 [ -f $D/dvhook.sh ] && [ "$(opt forced_subs)" = on ] && run dvhook "forced subtitles" sh $D/dvhook.sh forced on   # MKV: forced subtitles only
+[ -f $D/isomusic.sh ] && run isomusic "ISO under Music" sh $D/isomusic.sh on   # ISO files in the Music lists too (jailbreak programs)
 [ -f $D/bdpaudec.db ] && log "audio: /res/bdpaudec.db -> $(ls -l /res/bdpaudec.db 2>/dev/null | sed 's/.*-> //')"   # set by the wrapper
 [ -f $D/subs.sh ] && run subs "subtitles" sh $D/subs.sh                   # improved subtitles
 [ -f $D/fpage.sh ] && run menu "factory menu" sh $D/fpage.sh on           # factory menu shortcut

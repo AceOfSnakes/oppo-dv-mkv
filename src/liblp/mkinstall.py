@@ -180,7 +180,27 @@ wv(){{ w4 $1 "$(printf '\\\\x%02x\\\\x%02x\\\\x%02x\\\\x%02x' $(($2 & 255)) $(($
 n=0; while [ "$(rd $((B + {RELOC_VA:#x})) 4)" = {RELOC_RAW} ]; do
   n=$((n + 1)); [ $n -gt 60 ] && {{ echo "liblp.so still not relocated after 60 s"; exit 1; }}; sleep 1; done
 [ $n -gt 0 ] && echo "waited $n s for the player to finish loading liblp.so"
-SDDS="0x7d99dc:19f6fd00:0xfdf619 0x7da328:19f6fd00:0xfdf619 0x7df664:19f6fd00:0xfdf619 0x8f4300:19f6fd00:0xfdf619 0xa72e50:19f6fd00:0xfdf619 0x100f7a0:cc81ff00:0xff81cc"   # player program: names of audio code 8 (address:stock bytes:stock value; 0x100f7a0 = the long-press info panel's table, "LPCM" filler)
+# What is used in the player program, per program (src/porting/findnames.py): name, settings getters (address:bytes:
+# a_cfg_get_subtitlelanguage, a_cfg_get_osdlanguage), language table, osdmsg string table, and the places naming audio
+# code 8 (address:stock bytes:stock value; the last one = the long-press info panel's table, "LPCM" filler)
+PLAY="
+RU 0x7ba644:37b5054601aa3a200df10201f8f72afc 0x7ba3b8:37b5054601aa37200df10201f8f770fd 0x1252068 0x1a55cd4 0x7d99dc:19f6fd00:0xfdf619 0x7da328:19f6fd00:0xfdf619 0x7df664:19f6fd00:0xfdf619 0x8f4300:19f6fd00:0xfdf619 0xa72e50:19f6fd00:0xfdf619 0x100f7a0:cc81ff00:0xff81cc   # RU-jb RU-ovl RU USA-jb
+EU 0x7ba644:37b5054601aa3a200df10201f8f72afc 0x7ba3b8:37b5054601aa37200df10201f8f770fd 0x1252068 0x1a55cd4 0x7d9a14:51f6fd00:0xfdf651 0x7da360:51f6fd00:0xfdf651 0x7df69c:51f6fd00:0xfdf651 0x8f4330:51f6fd00:0xfdf651 0xa72e80:51f6fd00:0xfdf651 0x100f7d8:0482ff00:0xff8204   # EU
+AU 0x7ba644:37b5054601aa3a200df10201f8f72afc 0x7ba3b8:37b5054601aa37200df10201f8f770fd 0x1252068 0x1a55cd4 0x7d99dc:21f6fd00:0xfdf621 0x7da328:21f6fd00:0xfdf621 0x7df664:21f6fd00:0xfdf621 0x8f4308:21f6fd00:0xfdf621 0xa72e58:21f6fd00:0xfdf621 0x100f7a8:d481ff00:0xff81d4   # AU
+CN 0x7ba644:37b5054601aa3a200df10201f8f72afc 0x7ba3b8:37b5054601aa37200df10201f8f770fd 0x1252068 0x1a55cd4 0x7d99d4:09f6fd00:0xfdf609 0x7da320:09f6fd00:0xfdf609 0x7df65c:09f6fd00:0xfdf609 0x8f42e8:09f6fd00:0xfdf609 0xa72e38:09f6fd00:0xfdf609 0x100f790:bc81ff00:0xff81bc   # CN
+TW 0x7ba644:37b5054601aa3a200df10201f8f72afc 0x7ba3b8:37b5054601aa37200df10201f8f770fd 0x1252068 0x1a55cd4 0x7d99ac:f1f5fd00:0xfdf5f1 0x7da2f8:f1f5fd00:0xfdf5f1 0x7df634:f1f5fd00:0xfdf5f1 0x8f42d8:f1f5fd00:0xfdf5f1 0xa72e28:f1f5fd00:0xfdf5f1 0x100f778:a481ff00:0xff81a4   # TW
+JP 0x7ba668:37b5054601aa3a200df10201f8f718fc 0x7ba3dc:37b5054601aa37200df10201f8f75efd 0x125b068 0x1a5ecdc 0x7d99f0:f1fafd00:0xfdfaf1 0x7da338:f1fafd00:0xfdfaf1 0x7df674:f1fafd00:0xfdfaf1 0x8f4364:f1fafd00:0xfdfaf1 0xa72ec0:f1fafd00:0xfdfaf1 0x100fc98:a486ff00:0xff86a4   # JP
+US 0x7ba648:37b5054601aa3a200df10201f8f72afc 0x7ba3bc:37b5054601aa37200df10201f8f770fd 0x125b068 0x1a5ecdc 0x7d99dc:d1fefd00:0xfdfed1 0x7da328:d1fefd00:0xfdfed1 0x7df664:d1fefd00:0xfdfed1 0x8f4618:d1fefd00:0xfdfed1 0xa73670:d1fefd00:0xfdfed1 0x10100a0:cc8aff00:0xff8acc   # US
+CXUHD 0x7ad1a4:37b5054601aa3a200df10201faf73ef9 0x7acf18:37b5054601aa37200df10201faf784fa 0x122bb00 0x1a2e05c 0x7cd060:46c0fb00:0xfbc046 0x7cdeb4:46c0fb00:0xfbc046 0x7d0f6c:46c0fb00:0xfbc046 0x8dba3c:46c0fb00:0xfbc046 0xa52cf0:46c0fb00:0xfbc046 0xfea018:1034fd00:0xfd3410   # CXUHD"
+# the running program's line -> SUBF OSDF LANGT STRT SDDS (nothing is patched in a program without a full match)
+playok(){{ [ "$(rd $((${{2%%:*}})) 16)" = ${{2#*:}} ] && [ "$(rd $((${{3%%:*}})) 16)" = ${{3#*:}} ] && [ "$(rd $(($4 + 0x7e * 10)) 10)" = 7e007e00656e67656e5f ] || return 1
+  SUBF=$((${{2%%:*}})); OSDF=$((${{3%%:*}})); LANGT=$(($4)); STRT=$(($5)); SDDS=; shift 5
+  for e in "$@"; do r=${{e#*:}}; c=$(rd $((${{e%%:*}})) 4)
+    [ "$c" = "${{r%%:*}}" ] || [ "$c" = "$(le $((B + {ATMOS_STR:#x})))" ] || return 1; done
+  SDDS="$*"; return 0; }}
+SUBF=; OI=$IFS; IFS='
+'
+for l in $PLAY; do IFS=$OI; playok ${{l%%#*}} && break; SUBF=; SDDS=; done; IFS=$OI
 SITES="{' '.join(f'{r[0]:#x}:{r[1]}:{r[2]}' for r in rows)}"
 DSITES="{' '.join(f'{va:#x}:{",".join(f"{o:#x}" for o in origs)}:{new:#x}' for va, origs, new in data)}"
 ZSITES="{' '.join(f'{va:#x}:{new:#x}' for va, new in zdata)}"
@@ -195,7 +215,8 @@ restore(){{ for e in $SITES; do a=$((B + ${{e%%:*}})); r=${{e#*:}}; [ "$(rd $a 4
   for e in $DSITES; do a=$((B + ${{e%%:*}})); r=${{e#*:}}; o=${{r%%:*}}; [ "$(rd $a 4)" = "$(le $((B + ${{r#*:}})))" ] && wv $a $((B + ${{o%%,*}})); done
   for e in $ZSITES; do a=$((B + ${{e%%:*}})); [ "$(rd $a 4)" = "$(le $((B + ${{e#*:}})))" ] && wv $a 0; done
   for e in $SDDS; do a=$((${{e%%:*}})); [ "$(rd $a 4)" = "$(le $((B + {ATMOS_STR:#x})))" ] && wv $a $((${{e##*:}})); done
-  T=$((0x1a55cd4 + 936 * 48))
+  [ -n "$SDDS" ] || return 0
+  T=$((STRT + 936 * 48))
   [ "$(rd $T 4)" = "$(le $((B + {ATMOS_W:#x})))" ] && [ -f /tmp/dvhook-s936.bin ] && dd if=/tmp/dvhook-s936.bin of=$M bs=1 seek=$T conv=notrunc 2>/dev/null; }}
 case "$1" in
 on)
@@ -233,17 +254,22 @@ on)
   for e in $SITES; do a=$((B + ${{e%%:*}})); r=${{e#*:}}; w4 $a "$(esc ${{r#*:}})"; done
   # the MKV subtitle start (Subtitle Language Auto, forced_subs) reads the player program's settings: only from a
   # program whose two getters and English table entry are where they are in the RU 65 family, else it stays stock
-  if [ "$(rd $((0x7ba644)) 16)" = 37b5054601aa3a200df10201f8f72afc ] && [ "$(rd $((0x7ba3b8)) 16)" = 37b5054601aa37200df10201f8f770fd ] \
-     && [ "$(rd $((0x1252068 + 0x7e * 10)) 10)" = 7e007e00656e67656e5f ]; then
-    wv $((B + {ML + 0x2c:#x})) $((0x7ba645)); wv $((B + {ML + 0x30:#x})) $((0x7ba3b9)); wv $((B + {ML + 0x34:#x})) $((0x1252068))
+  # string 936 must be "SDDS" in all 12 languages (the table is filled while the player starts)
+  T=$((STRT + 936 * 48)); sd=
+  if [ -n "$SDDS" ]; then n=0
+    while [ "$(rd $T 4)" = 00000000 ] && [ $n -lt 20 ]; do sleep 1; n=$((n + 1)); done
+    if [ "$(rd $T 4)" = "$(le $((B + {ATMOS_W:#x})))" ]; then sd=1; else
+      sd=1; i=0; while [ $i -lt 12 ]; do a=$(rd $((T + i * 4)) 4); [ ${{#a}} = 8 ] || a=00000000; a=$((0x$(echo $a | sed 's/\\(..\\)\\(..\\)\\(..\\)\\(..\\)/\\4\\3\\2\\1/')))
+        [ "$(rd $a 10)" = 53004400440053000000 ] || sd=; i=$((i + 1)); done; fi
+  fi
+  if [ -n "$sd" ]; then
+    wv $((B + {ML + 0x2c:#x})) $((SUBF | 1)); wv $((B + {ML + 0x30:#x})) $((OSDF | 1)); wv $((B + {ML + 0x34:#x})) $LANGT
     # audio code 8 (SDDS, never used here; mkv_thd gives it to MKV TrueHD with Atmos) is named "Dolby Atmos": the
     # program's pointers to its names (front display, IP control, info bar, long-press info panel), and osdmsg string
-    # 936 in its 12 languages
-    # (the info bar; originals kept in /tmp for off, the table is built at each boot)
+    # 936 in its 12 languages (the info bar; originals kept in /tmp for off, the table is built at each boot)
     printf 'Dolby Atmos\\000' | dd of=$M bs=1 seek=$((B + {ATMOS_STR:#x})) conv=notrunc 2>/dev/null
     printf 'D\\000o\\000l\\000b\\000y\\000 \\000A\\000t\\000m\\000o\\000s\\000\\000\\000' | dd of=$M bs=1 seek=$((B + {ATMOS_W:#x})) conv=notrunc 2>/dev/null
     for e in $SDDS; do a=$((${{e%%:*}})); r=${{e#*:}}; [ "$(rd $a 4)" = "${{r%%:*}}" ] && wv $a $((B + {ATMOS_STR:#x})); done
-    T=$((0x1a55cd4 + 936 * 48))
     if [ "$(rd $T 4)" != "$(le $((B + {ATMOS_W:#x})))" ]; then
       dd if=$M bs=1 skip=$T count=48 of=/tmp/dvhook-s936.bin 2>/dev/null
       i=0; while [ $i -lt 12 ]; do wv $((T + i * 4)) $((B + {ATMOS_W:#x})); i=$((i + 1)); done
