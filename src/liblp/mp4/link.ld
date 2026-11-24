@@ -7,6 +7,8 @@ orig_tkhd   = 0x4304d8;   /* CLpMp4Parser::vMP4TKHDHandle */
 orig_gsi    = 0x4085b8;   /* CLpMp4Parser::mrGetStreamInfo */
 orig_extsub = 0x3eb53c;   /* CLpMp4MediaManagerProxy::vSetExtSubLanguage */
 orig_srt    = 0x58a768;   /* mrSpsDecStringByFmtSRT */
+orig_ass    = 0x58a4d0;   /* mrSpsDecStringByFmtASS */
+orig_anal   = 0x3a6318;   /* CLpSpParser::vAnalyzeFileFormat() */
 hdlr_sub    = 0x403f20;   /* vMP4HDLRHandle: 'subp' path (subtitle track) */
 hdlr_other  = 0x403fe8;   /* vMP4HDLRHandle: other handler types */
 stsd_drop   = 0x4291d8;   /* vMP4STSDHandle: rest of "drop this subtitle track" */
@@ -29,9 +31,13 @@ SECTIONS {
   .cave5 : { *(.text.cave5) }
   . = 0x530de8;            /* vMPCTestDvdRwdSpeedThr, 0x9e4 bytes: moov pre-scan */
   .cave3 : { *(.text.cave3) }
+  . = 0x53276c;            /* vMPCTestPauseWithAThr, 0x810 bytes: MP4 tx3g styles */
+  .cave7 : { *(.subtx3g) }
   . = 0x53f4c4;            /* vMPCTestOperation1, 0x7fc bytes: subtitle fixes (MKV VobSub palette, MP4 VobSub size) */
   .cave4 : { *(.text.cave4) }
   . = 0x5402fc;            /* vMPCTestOperation4, 0xae8 bytes: shims, hooks, language table */
   .text : { KEEP(*(.text.entry)) *(.text .text.*) *(.rodata*) }
+  . = 0x542360;            /* vMPCMpgFilePbTest, 0x9fc bytes: text subtitles (tags, top position) */
+  .cave6 : { *(.subtext) }
   /DISCARD/ : { *(.interp) *(.dynsym) *(.dynstr) *(.hash) *(.gnu.hash) *(.dynamic) *(.ARM.exidx*) *(.ARM.extab*) *(.comment) *(.data*) *(.bss*) *(.debug*) }
 }

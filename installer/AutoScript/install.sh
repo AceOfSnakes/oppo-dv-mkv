@@ -12,7 +12,7 @@
 #                                       ftrfix.sh, mp4elfix.sh, alacdec.bin, bdpaudec.db, vidopt.sh, dlnaiso, dlnaiso.sh,
 #                                       dmrhook.sh, dmrhook.bin, xtmenu.sh, xtload.bin, xtmenu.bin (Dolby Vision MKV fix),
 #                                       bootmsg.sh, bootmsg.bin (all), subs.sh,
-#                                       image_bdp83.bin (subtitles), fpage.sh (factory menu), languages.txt (MP4 language list, from
+#                                       image_bdp83.bin, font.bin (subtitles), fpage.sh (factory menu), languages.txt (MP4 language list, from
 #                                       oppo-dv-mkv-languages.txt on the stick), options.txt (video options, from
 #                                       oppo-dv-mkv-options.txt on the stick). RAM patches applied at every boot.
 # Nothing in the firmware itself is modified. Log: oppo-dv-mkv.log in the root of the USB stick.
@@ -34,6 +34,7 @@ IN_DV=$DV; IN_SUBS=$SUBS; IN_MENU=$MENU   # what this zip contains (DV/SUBS/MENU
 SQUARES="09 11 18 19 20 21 22 23"
 RESORIG=${OPPODV_RESORIG:-/mnt/rootfs_normal/res/image_bdp83.bin}
 DBORIG=${OPPODV_DBORIG:-/mnt/rootfs_normal/res/bdpaudec.db}   # audio DSP decoders (stock v65: 0abee82b...)
+FONTORIG=${OPPODV_FONTORIG:-/mnt/rootfs_normal/res/font.bin}  # subtitle / menu font (stock v65: dbc31c6c...)
 exec >>$L 2>&1
 # once per boot: some players start AutoScript twice (e.g. with a second USB disk); two runs must not overlap
 mkdir ${OPPODV_LOCK:-/tmp/oppo-dv-mkv.lock} 2>/dev/null || { echo "=== installer already started during this boot, not again"; exit 0; }
@@ -212,7 +213,7 @@ if [ -z "$DV$SUBS$MENU" ] && [ -n "$MENU_NN" ] && [ -z "$IN_DV$IN_SUBS" ]; then
 fi
 [ -n "$DV$SUBS$MENU" ] || fail "none of the parts in this zip can be installed safely on this player"
 FILES="dvmkv.sh${BMSG:+ bootmsg.sh bootmsg.bin}${DV:+ dvhook.sh p7kel.sh bgfix.sh sarfix.sh arflag.sh dvexit.sh dvcm.sh hvccfix.sh ftrfix.sh mp4elfix.sh alacdec.bin vidopt.sh}${ISO:+ dlnaiso dlnaiso.sh dmrhook.sh dmrhook.bin}${PAGE:+ xtmenu.sh xtload.bin xtmenu.bin}${SUBS:+ subs.sh}${MENU:+ fpage.sh}"
-for f in $FILES bdpprog ${SUBS:+$(for q in $SQUARES; do echo sq$q.png; done)}; do
+for f in $FILES bdpprog ${SUBS:+$(for q in $SQUARES; do echo sq$q.png; done) font.bin.gz}; do
   [ -f $S/oppo-dv-mkv/$f ] || fail "missing $f on the stick (unzip the whole release)"
   grep -q " $f\$" $S/oppo-dv-mkv/MD5SUMS && [ "$(m5 $S/oppo-dv-mkv/$f)" = "$(grep " $f\$" $S/oppo-dv-mkv/MD5SUMS | cut -d' ' -f1)" ] \
     || fail "$f on the stick is corrupt (md5 mismatch) - re-copy the release"
@@ -272,8 +273,18 @@ EOT
     sync; [ "$(m5 $I)" = 44bedb87bacfc5217ec22cffd2b18295 ] && mv $I $D/image_bdp83.bin && sync \
       && echo "  $D/image_bdp83.bin built" || { rm -f $I; echo "  subtitle menu image could not be built (skipped)"; }
   fi
-elif [ -e $D/subs.sh ] || [ -e $D/image_bdp83.bin ]; then
-  rm -f $D/subs.sh $D/image_bdp83.bin; echo "  subtitle improvements not installed now: older copy removed"
+  # subtitle font: the player's font with the letters subtitles need added (Hungarian double acute, Romanian comma
+  # below, Traditional Chinese); used from the next boot when the menu language uses the main font
+  if [ "$(m5 $FONTORIG)" != dbc31c6c4979ef4e86d7723c18bf4eed ]; then rm -f $D/font.bin; echo "  subtitle font: unexpected original file (skipped)"
+  elif [ "$(m5 $D/font.bin)" = 7ffd6c8c88be9d4787ba0cf36e91b424 ]; then echo "  $D/font.bin up to date"
+  else
+    I=$D/font.bin.tmp
+    gunzip -c $S/oppo-dv-mkv/font.bin.gz > $I; sync
+    [ "$(m5 $I)" = 7ffd6c8c88be9d4787ba0cf36e91b424 ] && mv $I $D/font.bin && sync \
+      && echo "  $D/font.bin installed" || { rm -f $I; echo "  subtitle font could not be installed (skipped)"; }
+  fi
+elif [ -e $D/subs.sh ] || [ -e $D/image_bdp83.bin ] || [ -e $D/font.bin ]; then
+  rm -f $D/subs.sh $D/image_bdp83.bin $D/font.bin; echo "  subtitle improvements not installed now: older copy removed"
 fi
 rm -f $D/disable $D/bootcount
 if [ -n "$CHAIN" ] && ! ours; then   # keep the jb_overlay boot script; our wrapper runs it instead of the player

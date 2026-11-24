@@ -17,7 +17,8 @@ mk(){  # $1 = zip name, $2 = parts (any of dv, subs, menu), $3 = flag file (UNIN
     cp src/dlnaiso/build/dlnaiso src/dlnaiso/dlnaiso.sh src/dlnaiso/build/dmrhook.sh src/dlnaiso/build/dmrhook.bin $P/
     cp src/setupmenu/xtmenu.sh src/setupmenu/build/xtload.bin src/setupmenu/build/xtmenu.bin $P/;; esac
   case "$2" in *subs*) cp src/subtitles/subs.sh $P/
-    for q in 09 11 18 19 20 21 22 23; do cp src/subtitles/squares/new$q.png $P/sq$q.png; done;; esac
+    for q in 09 11 18 19 20 21 22 23; do cp src/subtitles/squares/new$q.png $P/sq$q.png; done
+    cp src/subtitles/font.bin.gz $P/;; esac
   case "$2" in *menu*) cp src/factory-menu/fpage.sh $P/;; esac
   (cd $P && md5sum * > MD5SUMS)
   case "$3" in

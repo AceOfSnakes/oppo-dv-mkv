@@ -19,6 +19,8 @@ typedef unsigned char u8; typedef unsigned short u16; typedef unsigned int u32; 
 #define CAVE3 __attribute__((section(".text.cave3"), noinline))   /* moov pre-scan: in vMPCTestDvdRwdSpeedThr (link.ld) */
 #define CAVE4 __attribute__((section(".text.cave4"), noinline))   /* subtitle fixes: in vMPCTestOperation1 (link.ld) */
 #define CAVE5 __attribute__((section(".text.cave5"), noinline))   /* progressive/interlaced: in vMPCTestDvdRwdThr (link.ld) */
+#define CAVE6 __attribute__((section(".subtext"), noinline))   /* text subtitles: in vMPCMpgFilePbTest (link.ld) */
+#define CAVE7 __attribute__((section(".subtx3g"), noinline))   /* MP4 tx3g styles: in vMPCTestPauseWithAThr (link.ld) */
 #include "iso639.h"
 
 #define ST_VA       0x757e80u   /* RW bss slack after dvhook's state (0x757e00..0x757e4c) */
@@ -74,9 +76,14 @@ struct st {
     short pgdy;      /* lines the current PGS epoch is moved down (Subtitle Shift; pg_feed) */
     u8 vprog;        /* the MP4's video is progressive (pre-scan: its avcC / hvcC; vid_trak) */
     u32 prov;        /* end time given to the tx3g line on screen for want of a next sample (mp4_srt / tx_end); 0 = none */
+    u8 top;          /* the text line being decoded asked for the top of the screen ({\an7..9}, {\a5..7}; txt_dec) */
+    u8 wlim;         /* word wrap width in narrow characters (0 = WRAP_DEF; dvhook.sh can set it) */
+    u8 rsv3[2];
+    u32 thits[2];    /* text lines cleaned, lines drawn at the top */
+    u32 tdec;        /* the subtitle decoder of the last text line (for reading its fields while testing) */
 };
 #define ST(base) ((volatile struct st *)((base) + ST_VA))
-_Static_assert(__builtin_offsetof(struct st, pgmix) == 0xe6 && __builtin_offsetof(struct st, pgsync) == 0xe7 && __builtin_offsetof(struct st, sps) == 0x128 && __builtin_offsetof(struct st, pgdy) == 0x12c && __builtin_offsetof(struct st, prov) == 0x130 && sizeof(struct st) == 0x134, "struct st layout (shims.S, mkinstall.py)");
+_Static_assert(__builtin_offsetof(struct st, pgmix) == 0xe6 && __builtin_offsetof(struct st, pgsync) == 0xe7 && __builtin_offsetof(struct st, sps) == 0x128 && __builtin_offsetof(struct st, pgdy) == 0x12c && __builtin_offsetof(struct st, prov) == 0x130 && __builtin_offsetof(struct st, top) == 0x134 && sizeof(struct st) == 0x144, "struct st layout (shims.S, mkinstall.py)");
 
 struct langmsg { u32 type; u16 idx; u8 c[3]; };
 typedef void (*send_t)(void *obj, u32 msg, void *data);
@@ -607,4 +614,238 @@ CAVE3 void tx_end(u8 *d, u32 base) {
     volatile u32 *e = (volatile u32 *)(d + SPS_ENDPTS);
     if (e[0] != pv || e[1]) s->prov = 0;                   /* another AU by now */
     else if ((nx = nx_au(d, *(u32 *)(d + SPS_STARTPTS), pv))) { e[0] = nx; s->prov = 0; }
+}
+
+/* ---- text subtitles (MKV S_TEXT/UTF8 and S_TEXT/ASS, MP4 tx3g): the subtitle decoder's text line, cleaned ----
+ * Stock (mrSpsFillShowDataInfo) knows <b> <u> <i> and their end tags (exact lower case), line breaks (\N \n LF; and
+ * '|', switched off in mkinstall.py) and deletes {...}. Anything else is drawn as text, so <font color="..."> showed
+ * on screen. In place, never longer than the input:
+ *  - <i> <b> <u> (any case) are kept in lower case; <br> becomes a line break; any other <tag ...> or </tag> goes.
+ *    A '<' not followed by a letter (or '/' and a letter) and closed by '>' on the same line stays text ("<3", "< >").
+ *  - {\...} override blocks: \i1 \b1 \u1 (\..0) become <i> <b> <u> (</..>); \an7..9 or SSA \a5..7 ask for the top of
+ *    the screen; the rest goes. A '{' not followed by '\' stays text (the stock {...} deletion is switched off). */
+static CAVE6 u32 txt_fix(u8 *t, u32 n, volatile u8 *top) {
+    u32 i = 0, o = 0;
+    while (i < n) {
+        u8 c = t[i];
+        if (c == '<') {
+            u32 j = i + 1, cl = 0;
+            if (j < n && t[j] == '/') { cl = 1; j++; }
+            u8 a = j < n ? t[j] | 0x20 : 0;
+            if (a >= 'a' && a <= 'z') {
+                u32 k = j;
+                while (k < n && t[k] != '>' && t[k] != '<' && t[k] != '\n' && t[k] != '\r') k++;
+                if (k < n && t[k] == '>') {
+                    if (k == j + 1 && (a == 'i' || a == 'b' || a == 'u')) {
+                        t[o++] = '<'; if (cl) t[o++] = '/'; t[o++] = a; t[o++] = '>';
+                    } else if (!cl && a == 'b' && (t[j + 1] | 0x20) == 'r' && (k == j + 2 || t[j + 2] == '/' || t[j + 2] == ' '))
+                        t[o++] = '\n';
+                    i = k + 1; continue;
+                }
+            }
+        } else if (c == '{' && i + 1 < n && t[i + 1] == '\\') {
+            u32 k = i + 1;
+            while (k < n && t[k] != '}' && t[k] != '\n') k++;
+            if (k < n) {
+                u8 b[16]; u32 m = 0;
+                for (u32 p = i + 1; p + 1 < k; p++) {
+                    if (t[p] != '\\') continue;
+                    u8 x = t[p + 1], y = p + 2 < k ? t[p + 2] : 0, z = p + 3 < k ? t[p + 3] : 0;
+                    if (x == 'a' && y == 'n') { if (z >= '7' && z <= '9') *top = 1; }
+                    else if (x == 'a' && y >= '5' && y <= '7' && !(z >= '0' && z <= '9')) *top = 1;
+                    else if ((x == 'i' || x == 'b' || x == 'u') && (y == '0' || y == '1') && !(z >= '0' && z <= '9')
+                             && o + m + 4 <= k + 1 && m + 4 <= sizeof b) {
+                        b[m++] = '<'; if (y == '0') b[m++] = '/'; b[m++] = x; b[m++] = '>';
+                    }
+                }
+                for (u32 q = 0; q < m; q++) t[o++] = b[q];
+                i = k + 1; continue;
+            }
+        }
+        t[o++] = c; i++;
+    }
+    return o;
+}
+
+/* UTF-8 code point at t (n bytes left): returns its length, the code point in *cp (a stray byte counts as itself). */
+static CAVE6 u32 u8cp(const u8 *t, u32 n, u32 *cp) {
+    u8 c = t[0]; u32 k = c >= 0xf0 ? 3 : c >= 0xe0 ? 2 : c >= 0xc0 ? 1 : 0, v = k ? c & (0x3f >> k) : c;
+    if (k >= n) { *cp = c; return 1; }
+    for (u32 j = 1; j <= k; j++) { if ((t[j] & 0xc0) != 0x80) { *cp = c; return 1; } v = v << 6 | (t[j] & 0x3f); }
+    *cp = v; return k + 1;
+}
+static CAVE6 u32 cpw(u32 c) {   /* display width: 2 for East Asian wide / full-width, else 1 */
+    return (c >= 0x1100 && c <= 0x115f) || (c >= 0x2e80 && c <= 0xa4cf) || (c >= 0xac00 && c <= 0xd7a3) ||
+           (c >= 0xf900 && c <= 0xfaff) || (c >= 0xfe30 && c <= 0xfe4f) || (c >= 0xff00 && c <= 0xff60) ||
+           (c >= 0xffe0 && c <= 0xffe6) || c >= 0x20000 ? 2 : 1;
+}
+/* Width of t[i..) up to the line end (LF, CR, \N, \n); tags <..> count 0. *e = where the line ends. */
+static CAVE6 u32 lwidth(const u8 *t, u32 n, u32 i, u32 *e) {
+    u32 w = 0, cp;
+    while (i < n) {
+        u8 c = t[i];
+        if (c == '\n' || c == '\r' || (c == '\\' && i + 1 < n && (t[i + 1] | 0x20) == 'n')) break;
+        if (c == '<') { u32 k = i + 1; while (k < n && k < i + 6 && t[k] != '>') k++; if (k < n && t[k] == '>') { i = k + 1; continue; } }
+        i += u8cp(t + i, n - i, &cp); w += cpw(cp);
+    }
+    *e = i; return w;
+}
+static CAVE6 u32 cdiv(u32 a, u32 b) { u32 q = 0; while (q * b < a) q++; return q; }   /* ceil(a / b), small values */
+/* Word wrap (the stock wrap skips MKV SRT / MP4 tx3g, and counts bytes): each line wider than lim is cut into the
+ * fewest lines that fit, of even width, at spaces (a space becomes LF; in place). Text without spaces (CJK) stays. */
+static CAVE6 void txt_wrap(u8 *t, u32 n, u32 lim) {
+    for (u32 i = 0; i < n; ) {
+        u32 e, w = lwidth(t, n, i, &e);
+        if (w > lim) {
+            u32 k = cdiv(w, lim), tgt = cdiv(w, k), x = 0, sp = 0, xs = 0, have = 0, cp;
+            for (u32 j = i; j < e; ) {
+                if (t[j] == '<') { u32 q = j + 1; while (q < e && q < j + 6 && t[q] != '>') q++; if (q < e && t[q] == '>') { j = q + 1; continue; } }
+                if (t[j] == ' ') {
+                    if (x < tgt) { sp = j; xs = x; have = 1; }
+                    else if (have && (tgt - xs < x - tgt || x > lim)) { t[sp] = '\n'; x = x - xs - 1; sp = j; xs = x; }
+                    else { t[j] = '\n'; x = 0; have = 0; j++; continue; }
+                }
+                j += u8cp(t + j, e - j, &cp); x += cpw(cp);
+            }
+        }
+        i = e + 1;
+    }
+}
+
+#define WRAP_DEF 48     /* narrow characters per line when the box below is not known */
+#define SPS_BOXW 0x9d3c  /* subtitle decoder: text box width (1520 on the 1920x1080 plane) */
+#define SPS_FONT 0x9d44  /* subtitle decoder: font size (66 at the default Subtitle Size); about 2 x width / size
+                            average narrow characters fit (49 at 1520 / 66) */
+/* After mrSpsDecStringByFmtSRT (+ mp4_srt) or mrSpsDecStringByFmtASS: the text line at SPS_TXT / SPS_LEN. */
+CAVE6 void txt_dec(u8 *d, u32 base) {
+    volatile struct st *s = ST(base);
+    u8 *t = *(u8 **)(d + SPS_TXT); u32 n = *(u32 *)(d + SPS_LEN);
+    s->top = 0; s->tdec = (u32)d;
+    if (!t || !n || n > 0x4000 || t == (u8 *)&s->space) return;
+    u32 m = txt_fix(t, n, &s->top);
+    u32 lim = s->wlim, bw = *(u32 *)(d + SPS_BOXW), fs = *(u32 *)(d + SPS_FONT);
+    if (!lim) lim = bw >= 200 && bw <= 1920 && fs >= 16 && fs <= 200 ? cdiv(2 * bw, fs) + 2 : WRAP_DEF;
+    txt_wrap(t, m, lim);
+    if (m == n) return;
+    s->thits[0]++;
+    if (!m) { s->space = ' '; *(u8 **)(d + SPS_TXT) = (u8 *)&s->space; m = 1; }
+    else t[m] = 0;                                 /* the stock parser searches the line with strstr / strchr */
+    *(u32 *)(d + SPS_LEN) = m;
+}
+
+/* mrSpsUpdateDecBufByTextString: bl mrSpsRenderTextOnSurf. The text box from the player program's style (x SPS_BOXX,
+ * bottom SPS_BOXY, height SPS_BOXH = 280 on the 1920x1080 subtitle plane) holds 3 lines of the larger font sizes; the
+ * drawer skips lines outside it, so the top line of a 4-line subtitle (long lines wrapped) was lost. The box is made
+ * TALL_BOX high, growing upwards (lines stay bottom-aligned). A line that asked for the top is drawn in a box at the
+ * top of the plane, its lines from the top of the box (vertical alignment SPS_VALIGN 1 = top). */
+#define VA_RENDER  0x5847b0u   /* mrSpsRenderTextOnSurf */
+#define SPS_BOXY   0x9d38
+#define SPS_BOXH   0x9d40
+#define SPS_VALIGN 0x9d54
+#define TOP_MARGIN 60
+#define TALL_BOX   600
+typedef u32 (*rend_t)(u8 *d, u32 surf, void *info);
+CAVE6 u32 txt_rend(u8 *d, u32 surf, void *info, u32 base) {
+    volatile struct st *s = ST(base);
+    rend_t f = (rend_t)(base + VA_RENDER);
+    u32 y = *(u32 *)(d + SPS_BOXY), h = *(u32 *)(d + SPS_BOXH), va = *(u32 *)(d + SPS_VALIGN);
+    if (y > 1080 || h > 1080) return f(d, surf, info);      /* not the layout we know */
+    u32 nh = h < TALL_BOX ? TALL_BOX : h;
+    if (nh > y) nh = y;
+    *(u32 *)(d + SPS_BOXH) = nh;
+    if (s->top) { s->thits[1]++; *(u32 *)(d + SPS_BOXY) = nh + TOP_MARGIN; *(u32 *)(d + SPS_VALIGN) = 1; }
+    u32 r = f(d, surf, info);
+    *(u32 *)(d + SPS_BOXY) = y; *(u32 *)(d + SPS_BOXH) = h; *(u32 *)(d + SPS_VALIGN) = va;
+    return r;
+}
+
+/* ---- external text subtitle files (.srt .ass .ssa .smi .sub .txt ...): UTF-8 without a BOM ----
+ * CLpSpParser::vAnalyzeFileFormat takes a file as UTF-8 (type 3, code page 0) or UTF-16 (1, 2) only from its BOM; any
+ * other file (type 0) is read in the menu's Text Subtitle Charset (Latin 1 / Latin 2 / Cyrillic / Other), so a UTF-8
+ * file without a BOM - most of them - came out garbled with any setting but Other. After it: a type 0 file whose start
+ * (the parser's read buffer) is valid UTF-8 with at least one non-ASCII character is UTF-8. A legacy code page file is
+ * practically never valid UTF-8, so the menu setting still applies to those. Reached through liblp's GOT slot of
+ * vAnalyzeFileFormat (every external text format's mrInit calls it). */
+#define VA_ANAL     0x3a6318u  /* CLpSpParser::vAnalyzeFileFormat() */
+#define VA_BUFSZ    0x3a4018u  /* CLpSpParser::u4GetSpParserBufSize() */
+#define GOT_SPBUF   0x6ecbfcu  /* GOT word: address of the global holding the parser's read buffer */
+#define SP_ENC      0x14       /* parser: 0 code page, 1 UTF-16 BE, 2 UTF-16 LE, 3 UTF-8 */
+CAVE6 void ext_utf8(u8 *p, u32 base) {
+    volatile struct st *s = ST(base);
+    if (*(u32 *)(p + SP_ENC) != 0) return;
+    u8 **bv = *(u8 ***)(base + GOT_SPBUF);
+    u8 *b = bv ? *bv : 0;
+    u32 n = ((u32 (*)(u8 *))(base + VA_BUFSZ))(p), hi = 0;
+    if (!b || n < 4 || n > 0x200000) return;
+    for (u32 i = 0; i < n; ) {
+        u8 c = b[i];
+        if (!c) break;
+        if (c < 0x80) { i++; continue; }
+        u32 k, cp;
+        if (c >= 0xc2 && c <= 0xdf) { k = 1; cp = c & 0x1f; }
+        else if (c >= 0xe0 && c <= 0xef) { k = 2; cp = c & 0x0f; }
+        else if (c >= 0xf0 && c <= 0xf4) { k = 3; cp = c & 0x07; }
+        else return;                                        /* not UTF-8 */
+        if (i + k >= n) break;                              /* cut off by the end of the buffer */
+        for (u32 j = 1; j <= k; j++) {
+            if ((b[i + j] & 0xc0) != 0x80) return;
+            cp = cp << 6 | (b[i + j] & 0x3f);
+        }
+        if ((k == 2 && (cp < 0x800 || (cp >= 0xd800 && cp <= 0xdfff))) || (k == 3 && (cp < 0x10000 || cp > 0x10ffff)))
+            return;                                         /* overlong or surrogate */
+        hi++; i += k + 1;
+    }
+    if (!hi) return;
+    *(u32 *)(p + SP_ENC) = 3;
+    s->thits[1] += 0x10000;
+}
+
+/* MP4 tx3g text styles: a sample is a 2-byte length, the UTF-8 text, then boxes; a 'styl' box lists ranges (start and
+ * end character, font id, face flags 1 bold / 2 italic / 4 underline, size, colour, 12 bytes each). They become
+ * <b> <i> <u> tags for the text decoder (stock ignored them: no italics in MP4 subtitles). The text is rewritten in
+ * place into the sample, whose 'styl' box (12 bytes per range, at most 21 bytes of tags) leaves room. */
+static CAVE7 void tx3g_styl(u8 *t, u32 l, u32 cap, u8 *d) {
+    struct { u16 s, e; u8 f; } sty[8]; u32 ns = 0, p = l;
+    while (p + 8 <= cap) {
+        u32 sz = be32(t + p), ty = be32(t + p + 4);
+        if (sz < 8 || sz > cap - p) break;
+        if (ty == FCC('s','t','y','l') && sz >= 10) {
+            u32 cnt = t[p + 8] << 8 | t[p + 9];
+            for (u32 k = 0; k < cnt && ns < 8 && 10 + 12 * k + 12 <= sz; k++) {
+                u8 *e = t + p + 10 + 12 * k;
+                sty[ns].s = e[0] << 8 | e[1]; sty[ns].e = e[2] << 8 | e[3]; sty[ns].f = e[6] & 7;
+                if (sty[ns].f && sty[ns].e > sty[ns].s) ns++;
+            }
+        }
+        p += sz;
+    }
+    u8 src[600];
+    if (!ns || l > sizeof src) return;
+    for (u32 i = 0; i < l; i++) src[i] = t[i];
+    u32 o = 0, ci = 0, lim = cap - 1, cp;
+    for (u32 i = 0; ; ci++) {
+        for (u32 k = 0; k < ns; k++)                       /* ends first, then starts */
+            if (sty[k].e == ci) for (int b = 2; b >= 0; b--)
+                if (sty[k].f >> b & 1 && o + 4 <= lim) { t[o++] = '<'; t[o++] = '/'; t[o++] = b == 0 ? 'b' : b == 1 ? 'i' : 'u'; t[o++] = '>'; }
+        if (i >= l) break;
+        for (u32 k = 0; k < ns; k++)
+            if (sty[k].s == ci) for (int b = 0; b < 3; b++)
+                if (sty[k].f >> b & 1 && o + 3 <= lim) { t[o++] = '<'; t[o++] = b == 0 ? 'b' : b == 1 ? 'i' : 'u'; t[o++] = '>'; }
+        u32 m = u8cp(src + i, l - i, &cp);
+        if (o + m > lim) break;
+        for (u32 j = 0; j < m; j++) t[o++] = src[i + j];
+        i += m;
+    }
+    t[o] = 0;
+    *(u32 *)(d + SPS_LEN) = o;
+}
+
+/* mrSpsDecTextStringByFormat: after mrSpsDecStringByFmtSRT. MP4 tx3g samples (mp4_srt), their styles, then the text
+ * pass for every text line. */
+CAVE7 void txt_srt(u8 *d, u32 base) {
+    u8 *t0 = *(u8 **)(d + SPS_TXT); u32 n0 = *(u32 *)(d + SPS_LEN);
+    mp4_srt(d, base);
+    u8 *t = *(u8 **)(d + SPS_TXT); u32 l = *(u32 *)(d + SPS_LEN);
+    if (t0 && t == t0 + 2 && l + 2 < n0) tx3g_styl(t, l, n0 - 2, d);
+    txt_dec(d, base);
 }

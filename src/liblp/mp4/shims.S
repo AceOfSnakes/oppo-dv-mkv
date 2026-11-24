@@ -101,16 +101,6 @@ m_lang:                        @ mrPlayFile: bl vSetExtSubLanguage (r0 = proxy)
     pop {r0-r3, r12, lr}
     bx lr
 
-m_srt:                         @ mrSpsDecTextStringByFormat: bl mrSpsDecStringByFmtSRT (r0 = decoder)
-    push {r0-r3, r12, lr}
-    bl orig_srt
-    str r0, [sp, #16]
-    ldr r0, [sp]
-    GETBASE
-    bl mp4_srt                 @ (decoder, base)
-    pop {r0-r3, r12, lr}
-    mov r0, r12
-    bx lr
 
     .ltorg
 
@@ -318,3 +308,48 @@ k_hevc:
 1:  pop {r0-r3, r12, lr}
     mov r3, #1
     bx lr
+
+    .section .subtext,"ax"
+@ Text subtitles (txt_dec / txt_rend in mp4.c).
+m_srt:                         @ mrSpsDecTextStringByFormat: bl mrSpsDecStringByFmtSRT (r0 = decoder)
+    push {r0-r3, r12, lr}
+    bl orig_srt
+    str r0, [sp, #16]
+    ldr r0, [sp]
+    GETBASE
+    bl txt_srt                 @ (decoder, base): tx3g samples and styles, then the text pass
+    pop {r0-r3, r12, lr}
+    mov r0, r12
+    bx lr
+
+m_ass:                         @ mrSpsDecTextStringByFormat: bl mrSpsDecStringByFmtASS (r0 = decoder)
+    push {r0-r3, r12, lr}
+    bl orig_ass
+    str r0, [sp, #16]
+    ldr r0, [sp]
+    GETBASE
+    bl txt_dec                 @ (decoder, base)
+    pop {r0-r3, r12, lr}
+    mov r0, r12
+    bx lr
+
+x_anal:                        @ GOT slot of CLpSpParser::vAnalyzeFileFormat() (r0 = parser)
+    push {r0-r3, r12, lr}
+    bl orig_anal
+    ldr r0, [sp]
+    GETBASE
+    bl ext_utf8                @ (parser, base)
+    pop {r0-r3, r12, lr}
+    bx lr
+
+m_rend:                        @ mrSpsUpdateDecBufByTextString: bl mrSpsRenderTextOnSurf (r0 = decoder, r1 = surface, r2 = info)
+    push {r0-r2, lr}
+    GETBASE
+    mov r3, r1
+    pop {r0-r2}
+    bl txt_rend                @ (decoder, surface, info, base)
+    pop {lr}
+    bx lr
+
+    .ltorg
+

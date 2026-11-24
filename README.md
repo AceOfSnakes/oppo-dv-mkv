@@ -141,6 +141,11 @@ MKV fix, and every place is checked before it is written.
 
 | | What you saw on the Oppo | Files | Now | Since | Details |
 |:-:|---|---|---|:-:|:-:|
+| 🔤 | **External `.srt` in UTF-8 garbled** (`aÃ§Ã£o`, `Ð¡ÑŠÐµÑˆÑŒ`) unless the file starts with a BOM | external subtitle files | ✅ read as UTF-8 | v2.2.0 | [fix 28](#28-text-subtitles-encodings-tags-and-line-handling-v220) |
+| 🔤 | **Hungarian ő ű and Traditional Chinese characters missing** (blank spaces) | all text subtitles | ✅ shown | v2.2.0 | [fix 28](#28-text-subtitles-encodings-tags-and-line-handling-v220) |
+| 🏷️ | **Formatting tags shown as text** (`<font color="#ff00ffff">`), `{\an8}` ignored | MKV text subtitles (SRT, ASS) | ✅ tags removed, `{\an8}` at the top | v2.2.0 | [fix 28](#28-text-subtitles-encodings-tags-and-line-handling-v220) |
+| ✂️ | **Long subtitle lines run off the screen or are not shown at all**; a 4th line is lost | MKV SRT, MP4 text; lines over 200 bytes (~100 Cyrillic or 66 CJK characters) | ✅ wrapped to fit, up to 4 lines | v2.2.0 | [fix 28](#28-text-subtitles-encodings-tags-and-line-handling-v220) |
+| *️⃣ | **No italics** in ASS and MP4 text subtitles; a `\|` starts a new line | MKV ASS, MP4 `tx3g`; all MKV/MP4 text | ✅ italics; `\|` is a character | v2.2.0 | [fix 28](#28-text-subtitles-encodings-tags-and-line-handling-v220) |
 | 💬 | **PGS subtitles never appear** when chosen after playback started on a text or VobSub subtitle | MKV with PGS and other subtitle types | ✅ shown, at the right time | v1.9.0 | [fix 20](#20-pgs-subtitles-together-with-other-subtitle-types-v190) |
 | 💬 | **Nothing appears after leaving a PGS track**, and the **last PGS line stays stuck** on screen | MKV that starts on PGS and has other subtitle types | ✅ every type shown, PGS line cleared | v1.9.0 | [fix 20](#20-pgs-subtitles-together-with-other-subtitle-types-v190) |
 | ⏱️ | **PGS lines flash by or are lost after a seek**; lines appear as soon as they are read, not at their time | the same MKVs, on the PGS track | ✅ on and off at their times, also after seeks | v1.9.0 | [fix 21](#21-pgs-subtitle-timing-and-seeks-v190) |
@@ -220,6 +225,36 @@ fix is unaffected. **Only the RU program has been tested on a real player so far
 offline against the regional programs and the programs from testers' dumps (see [Tests](#tests)). With the jb_overlay dark theme, the colour squares in
 the subtitle menu keep the theme's colours (the subtitles themselves change). If your player is skipped, make a
 [full dump](#helping-to-support-another-firmware-full-dump) and share it privately.
+
+### Text subtitles (v2.2.0)
+
+Text subtitles (SRT and ASS in MKV, `tx3g` in MP4, and external `.srt` files) were tested on the TV's picture with
+test files for every case below:
+
+| | Stock | With oppo-dv-mkv |
+|---|---|---|
+| External `.srt` in UTF-8 without a BOM (most files) | read in the menu's *Text Subtitle Charset*: garbled | ✅ recognised as UTF-8 |
+| External `.srt` in a code page (Latin 1, Latin 2, Cyrillic), UTF-8 with BOM, UTF-16 | ✅ | ✅ unchanged: a code-page file still follows the *Text Subtitle Charset* setting |
+| Hungarian ő ű Ő Ű, Romanian ș ț, Traditional Chinese (all common characters) | blank | ✅ shown (see the font below) |
+| `<font color="...">` and other tags in MKV text tracks | drawn as text | ✅ removed (colours are not used) |
+| `{\an8}` (top of the screen) in MKV SRT and ASS | ignored | ✅ at the top |
+| Italics in MKV ASS (`{\i1}`) and MP4 `tx3g` (style boxes) | lost | ✅ italic, also inside a line |
+| Italics in MKV SRT (`<i>`) | ✅ | ✅ |
+| Long lines in MKV SRT and MP4 | not wrapped: run off both edges | ✅ wrapped at spaces into even lines, by the width of the subtitle size you set |
+| Long lines in MKV ASS | wrapped after 54 bytes (27 Cyrillic letters) | ✅ wrapped by width |
+| A subtitle of more than 200 bytes | not shown at all | ✅ shown |
+| A subtitle of 4 lines | 4th line lost | ✅ 4 lines |
+| A `\|` in the text | starts a new line | ✅ shown as `\|` |
+| `{ }` in the text | removed with everything between | ✅ shown |
+
+These are part of the Dolby Vision MKV fix (the liblp patch), like the other subtitle fixes.
+
+**Subtitle font.** The player draws subtitles with its menu font, which lacks a few letters. The *Subtitle
+improvements* part installs a copy of the player's own font with them added: Hungarian ő ű Ő Ű (built from the
+font's own letters, in the same style), Romanian ș ț Ș Ț (shown with a cedilla, ş ţ, as many fonts do) and the
+2,027 everyday Traditional Chinese characters it was missing (Big5 level 1). It is used with every menu language
+except Chinese, Japanese and Russian, which use their own fonts. The installer checks that the player's font is the
+expected one before installing it.
 
 ## MP4 files (v1.8.0)
 
@@ -616,6 +651,16 @@ are not.
 
 ## Known limitations
 
+- **Text subtitles (v2.2.0):**
+  - **External `.srt` files** are drawn by a different part of the player: there, **italics** are not shown,
+    **`{\an8}`** is ignored (bottom of the screen), a `|` still starts a new line, and a subtitle that wraps to a
+    **4th line loses its first line**. Mux the `.srt` into the MKV (mkvmerge) to get all of these.
+  - **Colours** (`<font color>`, ASS colours) and other ASS styling (fonts, sizes, positions other than top and
+    bottom) are not used.
+  - **Overlapping subtitles** (two cues on screen at the same time) are shown one at a time, also on stock firmware.
+  - Chinese and Japanese lines **without spaces are not wrapped**; lines beyond the 4th are cut.
+  - With the menu language set to **Chinese, Japanese or Russian** the player uses other fonts, which do not have the
+    added letters (the Chinese one also lacks most European accents).
 - **DLNA disc images (v2.1.0):** seeking from the app does nothing (use the remote). A disc folder needs a WebDAV
   server; a link into a `BDMV` folder on a plain web server plays only that file, the stock way. Throughput is the
   server's: tested at 15-16 MB/s, enough for UHD discs, but slower servers stutter. Only the RU 65-0131 program family
@@ -1212,6 +1257,27 @@ Direct rule changes, so that 1080-line outputs keep 25 and 30 Hz. A first versio
 player's guess instead; it also turned real 1080i files into 25 Hz with combing, and was dropped for reading the
 stream. Details: [docs/TECHNICAL.md](docs/TECHNICAL.md), Parts 1d and 5.
 
+### 28. Text subtitles: encodings, tags and line handling (v2.2.0)
+
+**Symptoms.** An external `.srt` saved as UTF-8 came out garbled; tags such as `<font color="#ff00ffff">` were shown
+on screen; long lines ran off the screen or the subtitle was not shown at all; ASS and MP4 subtitles had no italics;
+Hungarian ő ű and many Traditional Chinese characters were blank.
+
+**Causes and fixes** (liblp, RAM only, and the font):
+- External subtitle files are taken as UTF-8 only when they start with a UTF-8 BOM; every other file is read in the
+  menu's code page. After the stock check, a file without a BOM that is valid UTF-8 (with at least one non-ASCII
+  character) is now taken as UTF-8. Real code-page files are practically never valid UTF-8, so they still follow
+  the menu setting.
+- The text decoder of MKV and MP4 subtitles knows only `<b>`, `<u>`, `<i>` (exactly in lower case) and deletes
+  `{...}`. Each line now goes through a pass that keeps those three tags, turns ASS `{\i1}` `{\b1}` `{\u1}` into
+  them, notes `{\an7}`-`{\an9}` (and SSA `{\a5}`-`{\a7}`) for the top of the screen, and removes every other tag.
+  The text box of such a line is moved to the top. MP4 `tx3g` style boxes are turned into the same tags.
+- The decoder rejected any line over 200 bytes, treated `|` as a line break, kept at most 3 lines, and wrapped only
+  ASS, after 54 bytes. Lines are now wrapped at spaces into lines of even width, counted in characters (two for each
+  Chinese, Japanese or Korean one) from the text box width and the subtitle size; the limit is 1000 bytes and 4
+  lines, and the text box is made taller so a 4th line is not clipped.
+- The font gets the missing letters (see [Text subtitles](#text-subtitles-v220)).
+
 ## Tests
 
 All tests were run on one Oppo UDP-203 with the RU 65-0131 jailbreak, connected through an AV receiver to a Dolby
@@ -1620,6 +1686,15 @@ Offline, in a simulator of the running player and of the boot wrapper (the race 
 | Boot wrapper: player switched off (exit 2) or restarted (exit 3) after a boot cut short | boot counter kept | ✅ counter cleared |
 | Boot wrapper: player crash within 120 s of a patched start | patches disabled, reboot | ✅ unchanged |
 | Installer: every scenario (regions, jb_overlay, CXUHD, updates from v1.4.0 to v1.8.0 and back, uninstall, check) | | ✅ 75/75 |
+
+### Text subtitles (v2.2.0)
+
+Synthetic test files with 15 numbered lines (Portuguese, Hungarian, German, Czech, Russian, Simplified and
+Traditional Chinese, Japanese, partial and whole-line italics, `<font>` tags, `{\an8}`, 3 lines, a 239-byte Russian
+line, `|` and symbols) as an MKV SRT track, an MKV ASS track, an MP4 `tx3g` track and external `.srt` files in UTF-8
+(with and without BOM), UTF-16, CP1250, CP1251 and CP1252, plus a user's SRT test file (line length, Latin 1
+letters, symbols, overlapping lines). Every line was grabbed from the TV's picture, stock and with the fix; results
+as in the table under [Text subtitles](#text-subtitles-v220).
 
 ### Final regression run (persistent install, fresh boot)
 

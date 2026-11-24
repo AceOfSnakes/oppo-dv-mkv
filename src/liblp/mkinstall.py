@@ -19,6 +19,8 @@ blob2, syms2 = load('mp4/build/mp4')
 blob3 = open('mp4/build/mp4b.bin', 'rb').read()   # moov pre-scan (same ELF, section .cave3)
 blob4 = open('mp4/build/mp4c.bin', 'rb').read()   # subtitle fixes (same ELF, section .cave4)
 blob5 = open('mp4/build/mp4d.bin', 'rb').read()   # progressive/interlaced (same ELF, section .cave5)
+blob6 = open('mp4/build/mp4e.bin', 'rb').read()   # text subtitles (same ELF, section .cave6)
+blob7 = open('mp4/build/mp4f.bin', 'rb').read()   # MP4 tx3g styles (same ELF, section .cave7)
 def bl(src, dst, op=0xeb000000):
     off = (dst - (src + 8)) >> 2
     assert -(1 << 23) <= off < (1 << 23)
@@ -36,8 +38,12 @@ CAVE4, CAVE4_LEN = 0x53f4c4, 0x7fc                       # vMPCTestOperation1
 CAVE4_ORIG = 'ff472de94c879fe54c379fe508808fe0'          # its first 16 bytes in liblp e39b358c
 CAVE5, CAVE5_LEN = 0x530490, 0x958                       # vMPCTestDvdRwdThr
 CAVE5_ORIG = 'f04f2de971df4de240b08de27c889fe5'          # its first 16 bytes in liblp e39b358c
-ST2, ST2LEN = 0x757e80, 0x134                            # mp4.c struct st
-assert len(blob) <= 0x400 and len(blob2) <= CAVE2_LEN and len(blob3) <= CAVE3_LEN and len(blob4) <= CAVE4_LEN and len(blob5) <= CAVE5_LEN and ST + STLEN <= ST2 and ST2 + ST2LEN <= 0x758000
+CAVE6, CAVE6_LEN = 0x542360, 0x9fc                       # vMPCMpgFilePbTest
+CAVE6_ORIG = 'f04f2de90290a0e1028b2ded4cd04de2'          # its first 16 bytes in liblp e39b358c
+CAVE7, CAVE7_LEN = 0x53276c, 0x810                       # vMPCTestPauseWithAThr
+CAVE7_ORIG = 'f04f2de98cd04de230808de20010a0e3'          # its first 16 bytes in liblp e39b358c
+ST2, ST2LEN = 0x757e80, 0x144                            # mp4.c struct st
+assert len(blob) <= 0x400 and len(blob2) <= CAVE2_LEN and len(blob3) <= CAVE3_LEN and len(blob4) <= CAVE4_LEN and len(blob5) <= CAVE5_LEN and len(blob6) <= CAVE6_LEN and len(blob7) <= CAVE7_LEN and ST + STLEN <= ST2 and ST2 + ST2LEN <= 0x758000
 hx = lambda b: ''.join('\\x%02x' % c for c in b)
 
 # code sites: (VA, original 4 bytes, new 4 bytes)
@@ -85,12 +91,34 @@ code.append((0x57aee8, bl(0x57aee8, 0x169a4c), bl(0x57aee8, syms2['p_need'])))  
 # (k_avc, k_hevc); the MP4 side rides on the moov pre-scan and the mrGetStreamInfo hook. Passed on only with "scan on".
 code.append((0x3c0468, struct.pack('<I', 0xe3a03001), bl(0x3c0468, syms2['k_avc'])))         # mov r3, #1 -> bl
 code.append((0x3c04c4, struct.pack('<I', 0xe3a03001), bl(0x3c04c4, syms2['k_hevc'])))        # mov r3, #1 -> bl
+# Text subtitles (MKV S_TEXT/UTF8 and ASS, MP4 tx3g; txt_dec / txt_rend in mp4.c): unknown tags such as
+# <font color="#rrggbbaa"> were drawn as text, {\an8} was ignored, '|' broke the line, a line over 200 bytes was not
+# shown at all (UTF-8: about 100 Cyrillic or 66 CJK characters), and the stock {...} deletion ate literal braces.
+code.append((0x58a0fc, bl(0x58a0fc, 0x15a6e0), bl(0x58a0fc, syms2['m_ass'])))                # bl mrSpsDecStringByFmtASS
+code.append((0x57fdfc, bl(0x57fdfc, 0x154110), bl(0x57fdfc, syms2['m_rend'])))               # bl mrSpsRenderTextOnSurf
+code.append((0x584e18, struct.pack('<I', 0x9a000036), struct.pack('<I', 0xea000036)))        # bls -> b: no {...} deletion
+code.append((0x583b48, struct.pack('<I', 0xe3a0107c), struct.pack('<I', 0xe3a010ff)))        # strchr '|' -> 0xff (never in UTF-8)
+code.append((0x583ba4, struct.pack('<I', 0xe3a0107c), struct.pack('<I', 0xe3a010ff)))
+code.append((0x584f0c, struct.pack('<I', 0xe35c00c8), struct.pack('<I', 0xe35c0ffa)))        # cmp ip, #200 -> #1000
+# the stock word wraps count bytes (54; ~27 Cyrillic characters) and skip MKV SRT / MP4 tx3g: off, txt_wrap does it
+code.append((0x585fcc, struct.pack('<I', 0x9afffc04), struct.pack('<I', 0xeafffc04)))        # bls -> b: no single-line wrap
+code.append((0x5858a4, struct.pack('<I', 0xe35a0036), struct.pack('<I', 0xe35a0ffa)))        # cmp sl, #54 -> #1000
+code.append((0x585c14, struct.pack('<I', 0xe3580036), struct.pack('<I', 0xe3580ffa)))        # cmp r8, #54 -> #1000
+# Embedded text: 4 lines instead of 3 (a long 2-line cue wrapped by txt_wrap needs a 4th; the text box is TALL_BOX):
+# line breaks counted by the tag finder, the line cap and the line array (0x14 per line) in mrSpsFillShowDataInfo.
+for va, w in ((0x5839e0, 0xe3510002), (0x583a80, 0xe3510002), (0x583b04, 0xe3510002), (0x583b80, 0xe3510002), (0x585ad0, 0xe3530002), (0x585f78, 0xe3530002)):
+    code.append((va, struct.pack('<I', w), struct.pack('<I', w + 1)))                         # cmp rX, #2 -> #3
+for va, w in ((0x584f44, 0xe3540003), (0x584f50, 0xe3a04003), (0x585ae0, 0xe3a01003), (0x585f84, 0xe3a01003)):
+    code.append((va, struct.pack('<I', w), struct.pack('<I', w + 1)))                         # cmp / mov #3 -> #4
+for va, w in ((0x584f7c, 0xe3a0003c), (0x584ff0, 0xe3a0203c)):
+    code.append((va, struct.pack('<I', w), struct.pack('<I', w - 0x3c + 0x50)))               # 0x3c -> 0x50 bytes
 # data sites, absolute addresses (runtime base + VA): (word VA, accepted original VAs, new VA)
 data = [(0x6ee3a4, [0x402628], syms2['m_moov']),             # MP4 box dispatch table: moov handler
         (0x6ee2a0, [0x402920], syms2['m_mdhd']),             # MP4 box dispatch table: mdhd handler
         (0x6ee2b4, [0x403cc4], syms2['m_hdlrbox']),          # MP4 box dispatch table: hdlr handler
         (0x6ee354, [0x4304d8], syms2['m_tkhd']),             # MP4 box dispatch table: tkhd handler (VobSub frame size)
-        (0x6e25c0, [0x4085b8, 0x14ac64], syms2['m_gsi'])]    # GOT: CLpMp4Parser::mrGetStreamInfo (resolved, or lazy = .plt)
+        (0x6e25c0, [0x4085b8, 0x14ac64], syms2['m_gsi']),    # GOT: CLpMp4Parser::mrGetStreamInfo (resolved, or lazy = .plt)
+        (0x6eb8dc, [0x3a6318, 0x14ac64], syms2['x_anal'])]   # GOT: CLpSpParser::vAnalyzeFileFormat (external text: UTF-8 without BOM)
 # data sites whose original word is 0 (word VA, new VA): MPC1 command 0x15 (set subpicture palette) was accepted only in
 # the stop state (state 0); also accept it in states 1-5, 8, 9 (the states that accept 0x12, switch subpicture), through
 # v_pltst: the stock handler mrMPC1ProcSetSpPltInStopSt, except when there is no SPS decoder (it would assert).
@@ -148,6 +176,8 @@ on)
   c=$(rd $((B + {CAVE3:#x})) 16); [ "$c" = {CAVE3_ORIG} ] || [ "$c" = {blob3[:16].hex()} ] || {{ echo "unexpected code at {CAVE3:#x}: $c"; exit 1; }}
   c=$(rd $((B + {CAVE4:#x})) 16); [ "$c" = {CAVE4_ORIG} ] || [ "$c" = {blob4[:16].hex()} ] || {{ echo "unexpected code at {CAVE4:#x}: $c"; exit 1; }}
   c=$(rd $((B + {CAVE5:#x})) 16); [ "$c" = {CAVE5_ORIG} ] || [ "$c" = {blob5[:16].hex()} ] || {{ echo "unexpected code at {CAVE5:#x}: $c"; exit 1; }}
+  c=$(rd $((B + {CAVE6:#x})) 16); [ "$c" = {CAVE6_ORIG} ] || [ "$c" = {blob6[:16].hex()} ] || {{ echo "unexpected code at {CAVE6:#x}: $c"; exit 1; }}
+  c=$(rd $((B + {CAVE7:#x})) 16); [ "$c" = {CAVE7_ORIG} ] || [ "$c" = {blob7[:16].hex()} ] || {{ echo "unexpected code at {CAVE7:#x}: $c"; exit 1; }}
   restore
   printf '{hx(blob)}' | dd of=$M bs=1 seek=$((B + {CAVE:#x})) conv=notrunc 2>/dev/null
   [ "$(rd $((B + {CAVE:#x})) {len(blob)})" = "{blob.hex()}" ] || {{ echo "blob verify failed"; exit 1; }}
@@ -159,6 +189,10 @@ on)
   [ "$(rd $((B + {CAVE4:#x})) {len(blob4)})" = "{blob4.hex()}" ] || {{ echo "blob verify failed (subtitles)"; exit 1; }}
   printf '{hx(blob5)}' | dd of=$M bs=1 seek=$((B + {CAVE5:#x})) conv=notrunc 2>/dev/null
   [ "$(rd $((B + {CAVE5:#x})) {len(blob5)})" = "{blob5.hex()}" ] || {{ echo "blob verify failed (scan type)"; exit 1; }}
+  printf '{hx(blob6)}' | dd of=$M bs=1 seek=$((B + {CAVE6:#x})) conv=notrunc 2>/dev/null
+  [ "$(rd $((B + {CAVE6:#x})) {len(blob6)})" = "{blob6.hex()}" ] || {{ echo "blob verify failed (text subtitles)"; exit 1; }}
+  printf '{hx(blob7)}' | dd of=$M bs=1 seek=$((B + {CAVE7:#x})) conv=notrunc 2>/dev/null
+  [ "$(rd $((B + {CAVE7:#x})) {len(blob7)})" = "{blob7.hex()}" ] || {{ echo "blob verify failed (tx3g styles)"; exit 1; }}
   dd if=/dev/zero of=$M bs=1 seek=$((B + {ST:#x})) count={STLEN} conv=notrunc 2>/dev/null
   dd if=/dev/zero of=$M bs=1 seek=$((B + {ST2:#x})) count={ST2LEN} conv=notrunc 2>/dev/null
   for e in $DSITES; do a=$((B + ${{e%%:*}})); wv $a $((B + ${{e##*:}})); done
@@ -194,6 +228,14 @@ langs)   # MP4 language list: up to 8 codes (2 or 3 letters); none = clear
   while [ $k -lt 8 ]; do v="$v\\x00\\x00\\x00\\x00"; k=$((k + 1)); done
   printf "$v" | dd of=$M bs=1 seek=$((B + {ST2 + 0x88:#x})) conv=notrunc 2>/dev/null
   echo "MP4 language list: $(rd $((B + {ST2 + 0x88:#x})) 32)";;
+wrap)    # text subtitle word wrap width in narrow characters (0 = built-in default)
+  [ "$(state)" = ok ] || {{ echo "dvhook is not on"; exit 1; }}
+  case "$2" in ''|*[!0-9]*) echo "usage: wrap N (0-255)"; exit 1;; esac
+  [ "$2" -le 255 ] || {{ echo "usage: wrap N (0-255)"; exit 1; }}
+  printf "$(printf '\\\\x%02x' $2)" | dd of=$M bs=1 seek=$((B + {ST2 + 0x135:#x})) conv=notrunc 2>/dev/null
+  echo "text wrap width: $((0x$(rd $((B + {ST2 + 0x135:#x})) 1)))";;
+txt)     # text subtitle counters: lines cleaned, lines at the top + 0x10000 x external UTF-8 files, last decoder
+  echo "txt=$(rd $((B + {ST2 + 0x134:#x})) 16)";;
 off)
   restore
   echo "dvhook OFF";;

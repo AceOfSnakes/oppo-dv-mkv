@@ -274,6 +274,43 @@ It runs only with the switch on. `mp4_gsi` (after `mrGetStreamInfo`) writes `+0x
 on. SD is left out on purpose: a 576p25 file flagged progressive would be sent in Source Direct at a rate HDMI has
 no 576-line mode for.
 
+## Part 1e: liblp.so, text subtitles (v2.2.0)
+
+Two text paths exist. **Embedded** text (MKV `S_TEXT/UTF8` and `S_TEXT/ASS`, MP4 `tx3g`) goes through the subtitle
+decoder: `mrSpsDecTextStringByFormat` → `mrSpsDecStringByFmtSRT` / `...ASS` (the ASS one skips the 8 commas) →
+`mrSpsUpdateDecBufByTextString` → `mrSpsFillShowDataInfo` (tags and lines) → `mrSpsRenderTextOnSurf` →
+`c_utext_render_textbox` (exported by the player program). **External** files are parsed in liblp (`CLpSp*Parser`)
+but drawn by the player program's DivX subtitle code with plain string drawing (no per-segment style): only the
+encoding can be fixed in liblp.
+
+Code: `src/liblp/mp4/mp4.c` (section `.subtext` in `vMPCMpgFilePbTest` 0x542360, 0x9fc bytes; `.subtx3g` in
+`vMPCTestPauseWithAThr` 0x53276c, 0x810 bytes; both MPC self-test code reachable only from other self-tests), shims
+in `src/liblp/mp4/shims.S`, sites in `src/liblp/mkinstall.py`.
+
+| Site (runtime VA) | Was | Now |
+|---|---|---|
+| 0x58a0f0 `bl mrSpsDecStringByFmtSRT` | | `m_srt` → `txt_srt`: `mp4_srt` (tx3g sample), `tx3g_styl` (style boxes → `<b> <i> <u>`, rewritten in place into the sample, whose `styl` box leaves room), `txt_dec` |
+| 0x58a0fc `bl mrSpsDecStringByFmtASS` | | `m_ass` → `txt_dec` |
+| `txt_dec` | | `txt_fix` (keep `<b> <i> <u>` in lower case, `<br>` → LF, drop other `<tags>`; `{\...}`: `\i \b \u` 0/1 → tags, `\an7-9` / SSA `\a5-7` → top, rest dropped; never longer than the input), then `txt_wrap` (balanced lines at spaces; width 2 for East Asian wide characters; limit = 2 × box width / font size + 2 = 49 at 1520 / 66, or `dvhook.sh wrap N`) |
+| 0x57fdfc `bl mrSpsRenderTextOnSurf` | | `m_rend` → `txt_rend`: box height (decoder +0x9d40, 280) at least 600, growing upwards (bottom +0x9d38 kept); a top line: bottom = height + 60, vertical alignment (+0x9d54) 1 = top (3 = bottom) |
+| 0x584e18 `bls` | `{...}` deleted | `b`: not deleted (`txt_fix` handles `{\...}`; literal braces stay) |
+| 0x583b48, 0x583ba4 `mov r1, #0x7c` (pipe) | a pipe is a line break | `#0xff` (never in UTF-8) |
+| 0x584f0c `cmp ip, #200` | lines over 200 bytes rejected | `#1000` |
+| 0x585fcc `bls`; 0x5858a4, 0x585c14 `cmp, #54` | wraps after 54 bytes (single-line non-UTF-8 lines; styled segments) | off (`b`; `#1000`) |
+| 0x5839e0, 0x583a80, 0x583b04, 0x583b80 (tag finder), 0x584f44 / 0x584f50, 0x585ad0 / 0x585ae0, 0x585f78 / 0x585f84 (fill) | 3 lines | 4 lines; line array (0x14 per line) 0x3c → 0x50 at 0x584f7c / 0x584ff0 |
+| GOT 0x6eb8dc `CLpSpParser::vAnalyzeFileFormat` | BOM only: EF BB BF → 3 (UTF-8), FF FE → 2, FE FF → 1, else 0 = menu code page | `x_anal` → original, then `ext_utf8`: type 0 + valid UTF-8 with a non-ASCII character in the parser's read buffer (`**GOT 0x6ecbfc`, size `u4GetSpParserBufSize`) → 3 |
+
+Decoder fields used (default style): x +0x9d34 (200), bottom +0x9d38 (990), width +0x9d3c (1520), height +0x9d40
+(280), font size +0x9d44 (66), line height +0x9d48 (72), horizontal alignment +0x9d50 (2 = centre). Style bits of a
+segment: 2 italic, 4 bold, 8 underline. State: `struct st` +0x134 (top, wrap width, counters, last decoder).
+
+**Font.** The player loads one font for menus and subtitles by OSD language (player program `FUN_007a60f8`): Chinese →
+`font_sub.bin`, Japanese → `font_jp.bin`, Russian → `font_rus.bin`, others → `font.bin` (a 12-byte header: u32 LE 1,
+u32 LE 8, u32 BE length, then TrueType). `src/subtitles/mkfont.py` builds the shipped `font.bin` from the player's own
+`font.bin` and `font_sub.bin`: ő ű Ő Ű from ó ú Ó Ú with the acute contour doubled, ș ț Ș Ț mapped to the cedilla
+glyphs, and the 2,027 Big5 level-1 characters missing from `font.bin` copied from `font_sub.bin` (scaled from 256 to
+1024 units per em and matched on a shared character). The boot wrapper swaps it into `/res` when its md5 matches.
+
 ## Part 2: bdpdrv1 (profile 7)
 
 ### Firmware facts that matter

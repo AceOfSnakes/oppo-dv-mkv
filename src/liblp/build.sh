@@ -17,8 +17,12 @@ llvm-objcopy -O binary -j .text mp4/build/mp4.elf mp4/build/mp4.bin
 llvm-objcopy -O binary -j .cave3 mp4/build/mp4.elf mp4/build/mp4b.bin
 llvm-objcopy -O binary -j .cave4 mp4/build/mp4.elf mp4/build/mp4c.bin
 llvm-objcopy -O binary -j .cave5 mp4/build/mp4.elf mp4/build/mp4d.bin
+llvm-objcopy -O binary -j .cave6 mp4/build/mp4.elf mp4/build/mp4e.bin
+llvm-objcopy -O binary -j .cave7 mp4/build/mp4.elf mp4/build/mp4f.bin
 [ $(stat -c %s mp4/build/mp4.bin) -le 2792 ] || { echo "mp4 blob does not fit vMPCTestOperation4"; exit 1; }
 [ $(stat -c %s mp4/build/mp4b.bin) -le 2532 ] || { echo "mp4 pre-scan blob does not fit vMPCTestDvdRwdSpeedThr"; exit 1; }
 [ $(stat -c %s mp4/build/mp4c.bin) -le 2044 ] || { echo "subtitle blob does not fit vMPCTestOperation1"; exit 1; }
 [ $(stat -c %s mp4/build/mp4d.bin) -le 2392 ] || { echo "scan-type blob does not fit vMPCTestDvdRwdThr"; exit 1; }
-md5sum build/dvhook.bin mp4/build/mp4.bin mp4/build/mp4b.bin mp4/build/mp4c.bin mp4/build/mp4d.bin
+[ $(stat -c %s mp4/build/mp4e.bin) -le 2556 ] || { echo "text subtitle blob does not fit vMPCMpgFilePbTest"; exit 1; }
+[ $(stat -c %s mp4/build/mp4f.bin) -le 2064 ] || { echo "tx3g style blob does not fit vMPCTestPauseWithAThr"; exit 1; }
+md5sum build/dvhook.bin mp4/build/mp4.bin mp4/build/mp4b.bin mp4/build/mp4c.bin mp4/build/mp4d.bin mp4/build/mp4e.bin mp4/build/mp4f.bin
