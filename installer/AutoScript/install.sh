@@ -12,7 +12,7 @@
 #                                       ftrfix.sh, mp4elfix.sh, alacdec.bin, bdpaudec.db, vidopt.sh, dlnaiso, dlnaiso.sh,
 #                                       dmrhook.sh, dmrhook.bin, xtmenu.sh, xtload.bin, xtmenu.bin (Dolby Vision MKV fix),
 #                                       bootmsg.sh, bootmsg.bin (all), subs.sh,
-#                                       image_bdp83.bin, font.bin (subtitles), fpage.sh (factory menu), languages.txt (MP4 language list, from
+#                                       image_bdp83.bin, font.bin (subtitles), fpage.sh (factory menu), languages.txt (MP4/MKV language list, from
 #                                       oppo-dv-mkv-languages.txt on the stick), options.txt (video options, from
 #                                       oppo-dv-mkv-options.txt on the stick). RAM patches applied at every boot.
 # Nothing in the firmware itself is modified. Log: oppo-dv-mkv.log in the root of the USB stick.
@@ -244,7 +244,7 @@ fi
 if [ -n "$DV" ]; then   # MP4 audio/subtitle language list: oppo-dv-mkv-languages.txt next to the AutoScript folder
   LS=${S%/*}/oppo-dv-mkv-languages.txt
   if [ -f $LS ]; then put $LS $D/languages.txt || fail "writing $D/languages.txt"
-    l=$(echo $(tr -d '\r' < $LS | grep -v '^[[:space:]]*#' | awk 'NF{print $1}')); echo "  MP4 language list: ${l:-none (the player keeps the first 8 tracks)}"
+    l=$(echo $(tr -d '\r' < $LS | grep -v '^[[:space:]]*#' | awk 'NF{print $1}')); echo "  language list (MP4, MKV): ${l:-none (the player keeps the first tracks)}"
   elif [ -f $D/languages.txt ]; then echo "  $D/languages.txt kept (no oppo-dv-mkv-languages.txt on the stick)"; fi
 fi
 # options: video options (vidopt.sh), DV MKV / L5, DLNA disc images, the boot message and the Setup page (dvmkv.sh),
@@ -252,7 +252,7 @@ fi
 OS=${S%/*}/oppo-dv-mkv-options.txt
 if [ -f $OS ]; then put $OS $D/options.txt || fail "writing $D/options.txt"
   v(){ x=$(tr -d '\r' < $OS | grep -v '^[[:space:]]*#' | sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\([A-Za-z0-9_-]*\).*/\1/p" | sed -n '$p' | tr A-Z a-z); echo ${x:-${2:-stock}}; }
-  echo "  options: dv_mkv $(v dv_mkv on), dv_l5 $(v dv_l5 on), native_25p $(v native_25p), menu_refresh $(v menu_refresh), default_language $(v default_language), dlna_iso $(v dlna_iso on), boot_message $(v boot_message on), setup_extras $(v setup_extras on)"
+  echo "  options: dv_mkv $(v dv_mkv on), dv_l5 $(v dv_l5 on), forced_subs $(v forced_subs off), native_25p $(v native_25p), menu_refresh $(v menu_refresh), default_language $(v default_language), dlna_iso $(v dlna_iso on), boot_message $(v boot_message on), setup_extras $(v setup_extras on)"
 elif [ -f $D/options.txt ]; then echo "  $D/options.txt kept (no oppo-dv-mkv-options.txt on the stick)"; fi
 [ -z "$MENU" ] && [ -e $D/fpage.sh ] && rm -f $D/fpage.sh && echo "  factory menu shortcut not installed now: older copy removed"
 if [ -n "$SUBS" ]; then

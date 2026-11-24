@@ -309,6 +309,46 @@ k_hevc:
     mov r3, #1
     bx lr
 
+    .section .subtx3g,"ax"
+k_thd:                         @ CLpMkvParser::eMapPBAudioCodec 0x3bac6c "mov r0, #11" (A_TRUEHD); r5 = parser, r6 = record
+    push {r1-r3, r12, lr}      @ (the next instruction pops pc: lr may change)
+    GETBASE
+    mov r2, r1
+    mov r0, r5
+    mov r1, r6
+    bl mkv_thd                 @ (parser, record, base) -> 0x1a, or 8 (Atmos)
+    pop {r1-r3, r12, lr}
+    bx lr
+
+.macro FORGET orig
+    push {r0-r3, r12, lr}
+    GETBASE
+    bl mkv_dtor                @ (proxy, base)
+    pop {r0-r3, r12, lr}
+    b \orig
+.endm
+k_dtor:                        @ CLpMkvMediaManagerProxy::~CLpMkvMediaManagerProxy (vtable D1 slot, GOT): r0 = proxy
+    FORGET orig_mkvdtor
+k_stop:                        @ CLpMkvMediaManagerProxy::mrStop (vtable): the proxy outlives the playback
+    FORGET orig_mkvstop
+k_uninit:                      @ CLpMkvMediaManagerProxy::mrUnInit (vtable)
+    FORGET orig_mkvuninit
+
+k_aelm:                        @ vMsgAElmStrmCallback 0x4e7fb4 "bl mrMapPBACodeMode" (r0 = wrapper, r1 = &code, r2 = type)
+    push {r0-r2, r4, r5, lr}
+    bl orig_mapcode
+    mov r4, r0
+    GETBASE
+    mov r3, r1
+    ldr r0, [sp]
+    ldr r1, [sp, #4]
+    ldr r2, [sp, #8]
+    bl mkv_aelm                @ (wrapper, &code, type, base)
+    mov r0, r4
+    pop {r1, r2, r3, r4, r5, lr}   @ (r0..r2 slots -> scratch r1..r3)
+    bx lr
+    .ltorg
+
     .section .subtext,"ax"
 @ Text subtitles (txt_dec / txt_rend in mp4.c).
 m_srt:                         @ mrSpsDecTextStringByFormat: bl mrSpsDecStringByFmtSRT (r0 = decoder)
@@ -353,3 +393,60 @@ m_rend:                        @ mrSpsUpdateDecBufByTextString: bl mrSpsRenderTe
 
     .ltorg
 
+
+@ MKV language list and forced subtitles (mkv_scan / mkv_keep / mkv_start in mp4.c), in vMPCTestSendSetFileInf2Pipe.
+    .section .langsel,"ax"
+    .arm
+k_tracks:                      @ H0 sites (bl mrParseTracks; r0 = parser, r2:r3 = Tracks size): read ahead, then dvhook's H0
+    push {r0-r3, r12, lr}
+    GETBASE                    @ (clobbers r2: the size is read back from the saved registers)
+    mov r3, r1
+    ldr r1, [sp, #8]
+    ldr r2, [sp, #12]
+    bl mkv_scan                @ (parser, size lo, size hi, base)
+    pop {r0-r3, r12, lr}
+    b h0_tracks
+
+.macro KEEP slot
+    push {r0-r3, r12, lr}
+    GETBASE
+    push {r1}                  @ base -> 5th argument
+    mov r3, \slot
+    ldr r2, [sp, #(4 + 24 + 72 + 4)]
+    ldr r1, [sp, #(4 + 24 + 72)]
+    mov r0, r6
+    bl mkv_keep                @ (parser, number lo, number hi, slot, base) -> 0 = leave out
+    add sp, sp, #4
+    cmp r0, #0
+    pop {r0-r3, r12, lr}
+.endm
+k_aud:                         @ mrParseTrackEntry 0x3c0578 "cmp r1, #9" (audio count); r6 = parser, [sp,#72] = TrackNumber
+    KEEP #0xff
+    beq ktrk_drop
+    cmp r1, #9
+    b kaud_ret
+k_sub:                         @ mrParseTrackEntry 0x3c0920 "cmp r2, #31" (subtitle count = the new record's index)
+    and r12, r2, #0xff         @ (r12 is scratch here: the stock code reloads it before use)
+    KEEP r12
+    beq ktrk_drop
+    cmp r2, #31
+    b ksub_ret
+
+k_start:                       @ mrOnStateSettingFileInfo 0x3d68f8 "bl mrMkvSetStreamInf" (r0 = proxy)
+    push {r0-r3, r12, lr}
+    GETBASE
+    mov r2, r1
+    add r1, sp, #24            @ the caller's frame
+    bl mkv_start               @ (proxy, frame, base)
+    pop {r0-r3, r12, lr}
+    b orig_mkvsetstrm
+
+m_chgsp:                       @ MKV proxy vtable: mrChangeSpStNo(r0 = proxy, r1 = PB_SPSTN_PARAM_T &)
+    push {r0-r3, r12, lr}
+    GETBASE
+    mov r2, r1
+    ldr r1, [sp, #4]
+    bl mkv_chg                 @ (proxy, param, base)
+    pop {r0-r3, r12, lr}
+    b orig_mkvchgsp
+    .ltorg

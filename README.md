@@ -146,6 +146,9 @@ MKV fix, and every place is checked before it is written.
 | 🏷️ | **Formatting tags shown as text** (`<font color="#ff00ffff">`), `{\an8}` ignored | MKV text subtitles (SRT, ASS) | ✅ tags removed, `{\an8}` at the top | v2.2.0 | [fix 28](#28-text-subtitles-encodings-tags-and-line-handling-v220) |
 | ✂️ | **Long subtitle lines run off the screen or are not shown at all**; a 4th line is lost | MKV SRT, MP4 text; lines over 200 bytes (~100 Cyrillic or 66 CJK characters) | ✅ wrapped to fit, up to 4 lines | v2.2.0 | [fix 28](#28-text-subtitles-encodings-tags-and-line-handling-v220) |
 | *️⃣ | **No italics** in ASS and MP4 text subtitles; a `\|` starts a new line | MKV ASS, MP4 `tx3g`; all MKV/MP4 text | ✅ italics; `\|` is a character | v2.2.0 | [fix 28](#28-text-subtitles-encodings-tags-and-line-handling-v220) |
+| 🔊 | **Audio tracks after the 10th never available**; the file's last audio track took the place of the 10th | MKV with more than 10 audio tracks | ✅ the [language list](#language-list) chooses the 10; without a list the first 10 | v2.2.0 | [fix 29](#29-mkv-language-list-and-forced-subtitles-v220) |
+| 🏷️ | **Dolby TrueHD listed as "MLP"** in the audio menu | MKV with TrueHD (also Atmos) | ✅ "Dolby TrueHD" | v2.2.0 | [fix 29](#29-mkv-language-list-and-forced-subtitles-v220) |
+| 🔊 | **Dolby Atmos never named** (the firmware has no Atmos text at all) | MKV with TrueHD Atmos | ✅ "Dolby Atmos" in the info bar, the audio menu and the IP control answer | v2.2.0 | [fix 29](#29-mkv-language-list-and-forced-subtitles-v220) |
 | 💬 | **PGS subtitles never appear** when chosen after playback started on a text or VobSub subtitle | MKV with PGS and other subtitle types | ✅ shown, at the right time | v1.9.0 | [fix 20](#20-pgs-subtitles-together-with-other-subtitle-types-v190) |
 | 💬 | **Nothing appears after leaving a PGS track**, and the **last PGS line stays stuck** on screen | MKV that starts on PGS and has other subtitle types | ✅ every type shown, PGS line cleared | v1.9.0 | [fix 20](#20-pgs-subtitles-together-with-other-subtitle-types-v190) |
 | ⏱️ | **PGS lines flash by or are lost after a seek**; lines appear as soon as they are read, not at their time | the same MKVs, on the PGS track | ✅ on and off at their times, also after seeks | v1.9.0 | [fix 21](#21-pgs-subtitle-timing-and-seeks-v190) |
@@ -267,7 +270,7 @@ in the same `liblp.so` patch), so they come with the `full`, `mkv-subtitles` and
 | Audio and subtitle languages | blank in the menus | **shown** (English, Portuguese ...) |
 | Text subtitles (`tx3g`, what ffmpeg calls `mov_text`; written by ffmpeg, HandBrake and most MP4 tools) | not listed, never shown | **shown**, with the right timing |
 | Chapters (Nero `chpl`, stored in `moov/udta` by every muxer) | ignored, no chapter skips | **chapters and chapter skips** |
-| More than 8 audio or 8 subtitle tracks | the first 8 of each in the file | **your languages first** ([language list](#language-list)) |
+| More than 8 audio or 8 subtitle tracks | the first 8 of each in the file | **your languages first** ([language list](#language-list); MKV too, v2.2.0) |
 | VobSub (DVD picture) subtitles from a 720x480 (NTSC) DVD | drawn too high | **in place** (v1.8.1, [fix 19](#19-mp4-vobsub-subtitles-too-high-v181)) |
 | **Subtitles in most ordinary MP4 films** (any subtitle format) | **never shown** (Oppo's bug, see below) | **shown** |
 
@@ -283,22 +286,39 @@ files that really need it, exactly as before. Dolby Vision MP4s never used the m
 
 ### Language list
 
-The player can use at most **8 audio and 8 subtitle tracks** of a file (its menus, its memory and its demuxer all
-stop at 8). Most files have fewer, and nothing changes for them. Multi-language files can carry 11 audio and 40
-subtitle tracks; stock firmware keeps the first 8 of each in file order and never shows the others, often missing
-the language you want.
+The player can use at most **8 audio and 8 subtitle tracks of an MP4** file and **10 audio and 32 subtitle tracks of
+an MKV** (its menus, its memory and its demuxer all stop there). Most files have fewer, and nothing changes for them.
+Multi-language files can carry 12 audio and 40 subtitle tracks; stock firmware keeps the first ones in file order and
+never shows the others, often missing the language you want. (In an MKV with more than 10 audio tracks, stock
+firmware even put the file's last audio track in place of the 10th, see [fix 29](#29-mkv-language-list-and-forced-subtitles-v220).)
 
 Zips with the Dolby Vision part contain **`oppo-dv-mkv-languages.txt`** next to the `AutoScript` folder. Write your
 languages in it, one per line, most wanted first (2- or 3-letter codes, the table is in the file), then run the
-installer. For a file with more than 8 tracks of a kind, the 8 are then chosen like this:
+installer. For a file with more tracks of a kind than the player can use, the tracks are then chosen like this:
 1. audio only: the file's **default audio track always stays** (usually the original language);
 2. every track of your first language (normal, SDH, forced ...), then of your second language, and so on;
 3. the slots still free get the other tracks in file order, except subtitle tracks of other languages that only have
-   a few lines (forced-only tracks): after a seek the player reads from the position of their current line, which can
-   be minutes back, and seeks and chapter skips took 20 to 50 seconds.
+   a few lines (forced-only tracks; in an MKV the tracks with the Forced flag): after a seek the player reads from
+   the position of their current line, which can be minutes back, and seeks and chapter skips took 20 to 50 seconds.
+
+**Chinese (v2.2.0):** `ZH` or `ZH-CN` means Simplified Chinese and `ZH-TW` Traditional Chinese: tracks tagged
+`zh-Hans`, `zh-CN`, `zh-SG` or `zh-Hant`, `zh-TW`, `zh-HK` (MKV `LanguageIETF`, MP4 `elng`). `CHI` means Chinese
+tracks without such a tag.
 
 The menus list the chosen tracks in file order. Running the installer again without the file on the stick keeps your
-list; the file as shipped (no languages) switches the list off. `dvmkv.log` shows `dvhook: MP4 language list: en pt`.
+list; the file as shipped (no languages) switches the list off. `dvmkv.log` shows `dvhook: language list: en pt`.
+
+**Starting subtitle of MKV files (v2.2.0).** Setup > Playback Setup > Language > Subtitle Language decides which
+subtitle track an MKV starts on. With a language (English, Spanish ...) the player starts on that language's track,
+as before. With **Auto** it took the file's first subtitle track, whatever its language; it now starts on the track
+in the **player's menu language** (the one with the Default flag when there are several), and on the first track as
+before when the file has none in that language.
+
+**Forced subtitles only** (option `forced_subs`, Setup > Extras, v2.2.0, MKV): the player starts on the subtitle
+track with the **Forced** flag (MKVToolNix "Forced display") in the Subtitle Language (Auto: the menu language), the
+track for the lines in another language; when the file has no such track, subtitles start **off**. Subtitles chosen
+from the menu while the film plays are not changed. MP4 files have no forced flag and are not affected. Needs the RU
+65-0131 player program family (like the Extras page); on other programs the subtitle start stays the player's own.
 
 ## Video options
 
@@ -312,6 +332,7 @@ installed. Since v2.1.2 most of them can also be changed on the player, in
 ```
 dv_mkv = on
 dv_l5 = on
+forced_subs = on
 native_25p = on
 menu_refresh = 60
 default_language = en
@@ -324,6 +345,7 @@ setup_extras = on
 |---|---|---|
 | `dv_mkv` | `on` (shipped), `off` | Dolby Vision from MKV files. `off`: the player's own way (HDR10 / SDR); everything else stays (v2.1.2) |
 | `dv_l5` | `on` (shipped), `off` | TV-led Dolby Vision: the active area (L5) goes to the TV, see [fix 24](#24-tv-led-dolby-vision-metadata-lost-on-the-way-to-the-tv-cm-29-and-cm-40-v200). `off`: Oppo's way, no L5; the other metadata fixes stay (v2.1.2) |
+| `forced_subs` | `on`, `off` (shipped) | MKV: start on the forced subtitles of the Subtitle Language, or none, see [Language list](#language-list) (v2.2.0) |
 | `native_25p` | `on`, `off` | HD files at 25, 29.97 or 30 frames/s play at that rate instead of 50 / 60 Hz |
 | `menu_refresh` | `60`, `50`, `stock` | refresh rate of the home menu and screen saver |
 | `default_language` | `en de fr es it sv nl pl zh zh-tw ja ru`, `stock` | the languages a factory reset sets |
@@ -383,6 +405,7 @@ the current value), OK on a value saves it, left goes back.
 |---|---|---|
 | Dolby Vision MKV | `dv_mkv` | at once, for the next file started |
 | Dolby Vision L5 | `dv_l5` | at once |
+| Forced Subtitles Only | `forced_subs` | at once, for the next file started |
 | Native 25p / 30p | `native_25p` | after the next power-on |
 | Home Menu Refresh | `menu_refresh` | after the next power-on |
 | Reset Language | `default_language` | after the next power-on (and only for a factory reset, as before) |
@@ -394,9 +417,10 @@ other lines in it stay. The help line at the bottom says what each row does; on 
 installed version. Installing again **with** `oppo-dv-mkv-options.txt` on the stick replaces the options with the
 file's; delete the file from the stick to keep what you set on the player.
 
-**English only for now.** The page's own texts (the category name, the rows, the help lines, values such as "60 Hz")
-are in English whatever menu language the player is set to; only On and Off come from Oppo's own translated texts.
-Translations may follow in a later version.
+**In the player's language (v2.2.0).** The page's own texts (the category name, the rows, the help lines, "Stock")
+follow the player's menu language, in all 12 of Oppo's languages; On and Off are Oppo's own texts. In v2.1.2 they
+were English only, and after a change of the player's language the Extras row read "Exit" (two Exit rows); fixed in
+v2.2.0.
 
 **Needs** the Dolby Vision MKV fix and the RU 65-0131 player program family (RU and USA jailbreak, jb_overlay V3,
 rebranded clones), like the [boot message](#boot-message-v210). On other programs the installer leaves it out and
@@ -690,8 +714,8 @@ are not.
 - **MP4 VobSub tracks written by ffmpeg** show wrong colours (or nothing, when ffmpeg copied a high-resolution bitmap
   track): ffmpeg stores the palette as text, where MP4 players expect the binary palette that MP4Box and HandBrake
   write. Put VobSub subtitles in an MKV, or mux the MP4 with MP4Box.
-- **MP4: at most 8 audio and 8 subtitle tracks** per file (the player's limit); the [language list](#language-list)
-  chooses which.
+- **MP4: at most 8 audio and 8 subtitle tracks** per file, **MKV: at most 10 audio and 32 subtitle tracks** (the
+  player's limits); the [language list](#language-list) chooses which.
 - **MP4 subtitles in files that are really badly interleaved** (Oppo's real interleave check still picks its special
   reading mode for them, see [fix 15](#15-mp4-subtitles-hidden-by-the-bad-interleave-mode-v180)) are still not
   shown. Common muxers interleave audio and video closely; files made with ffmpeg were tested and are not affected.
@@ -738,7 +762,7 @@ are not.
   the patcher logs a mismatch and does nothing.
 - **Check that it is active:** `dvmkv.log` on the player should contain `dvhook: dvhook ON`, `p7kel: p7kel ON`,
   `bgfix: on (on)` (since v1.6.0), `sarfix: on (on)`, `arflag: on (on)` (since v1.9.0), `dvexit: on (on)` (since v2.0.0), `dvcm: on (on)` (since v2.0.0), `ftrfix: on (on)` and `mp4elfix: on (on)` (since v2.0.1), `hvccfix: on (on)` and `dvhook: empty hvcC (no VPS/SPS/PPS):
-  DV allowed` (since v1.7.0), `dvhook: MP4 language list: ...` (since v1.8.0) and `boot marked healthy`.
+  DV allowed` (since v1.7.0), `dvhook: language list: ...` (since v1.8.0; `MP4 language list` before v2.2.0) and `boot marked healthy`.
 
 ## What was broken, and how it was fixed
 
@@ -1278,6 +1302,36 @@ Hungarian ő ű and many Traditional Chinese characters were blank.
   lines, and the text box is made taller so a 4th line is not clipped.
 - The font gets the missing letters (see [Text subtitles](#text-subtitles-v220)).
 
+### 29. MKV language list and forced subtitles (v2.2.0)
+
+**Symptoms.** In an MKV with more than 10 audio or 32 subtitle tracks, the later ones were never available, whatever
+language they were in. With more than 10 audio tracks, the 10th entry of the audio menu played the file's last audio
+track. With Subtitle Language = Auto, every MKV started on its first subtitle track, whatever its language.
+
+**Causes.** `CLpMkvParser::mrParseTrackEntry` keeps at most 10 audio and 32 subtitle track records, the first ones in
+the file (an 11th audio record would overlap the subtitle records), and it reads neither the Forced flag nor the
+BCP 47 language tag. `mrParseTrackAudio`, which reads a track's audio values before the track is stored, set the
+audio count back to 9 when it was already 10 and wrote the new track's values over the 10th record; the track was
+then stored there. With Auto, the player program switches the first subtitle track on right after the start.
+
+**TrueHD name.** The MKV code hands the menus codec code 0xb for `A_TRUEHD`, which the player names "MLP" (the
+DVD-Audio format); its "Dolby TrueHD" is code 0x1a. Both select the same decoder setup, so only the name changes.
+
+**Dolby Atmos (v2.2.0).** The firmware has no "Atmos" text anywhere; discs show "Dolby TrueHD" too. For an MKV with
+TrueHD, the track-list read-ahead also looks at the first blocks of the first cluster: a TrueHD track whose first
+major sync carries the 16-channel presentation (4 substreams) is Atmos. Such a track is handed to the menus as the
+codec code of SDDS (Sony's cinema format, which never occurs on this player and selects the same decoder setup), and
+that code's names in the player program (info bar, audio menu, front display, IP control) are pointed at "Dolby
+Atmos". Needs the RU 65-0131 player program family; elsewhere Atmos tracks keep the name "Dolby TrueHD".
+
+**Fix (`dvhook.sh`).** At the start of the Tracks element the whole element is read ahead and every track's number,
+type, language, `LanguageIETF`, Default and Forced flags are noted. With a [language list](#language-list) and more
+tracks than fit, the tracks are chosen as for MP4 files, and the parser's own "too many tracks" checks leave the
+others out (they are freed like tracks of an unknown type). `mrParseTrackAudio` no longer resets the count, so a
+track past the 10th is simply left out. With Subtitle Language = Auto (read from the player's settings when a file
+starts), the player's first subtitle switch-on for the file is replaced by the track in the menu language; with
+`forced_subs`, by the forced track in the Subtitle Language (Auto: the menu language), or by no subtitles.
+
 ## Tests
 
 All tests were run on one Oppo UDP-203 with the RU 65-0131 jailbreak, connected through an AV receiver to a Dolby
@@ -1695,6 +1749,28 @@ line, `|` and symbols) as an MKV SRT track, an MKV ASS track, an MP4 `tx3g` trac
 (with and without BOM), UTF-16, CP1250, CP1251 and CP1252, plus a user's SRT test file (line length, Latin 1
 letters, symbols, overlapping lines). Every line was grabbed from the TV's picture, stock and with the fix; results
 as in the table under [Text subtitles](#text-subtitles-v220).
+
+### Language list and forced subtitles (v2.2.0)
+
+Synthetic test files: an MKV with 12 audio tracks (each a different tone) and 20 subtitle tracks (every line names
+its track; two forced, Chinese tagged `zh-Hant`, `zh-Hans`, `zh-TW`), variants with the first audio track in
+Portuguese or Russian and with 20 more subtitle tracks (40), and an MP4 with 11 text subtitle tracks and `elng` boxes.
+Checked from the TV's picture and the player's IP control answers.
+
+| Test | Stock | With the fix |
+|---|---|---|
+| MKV 12 audio, language list EN PT | first 9 audio + the file's last one as 10th | ✅ default (English) and Portuguese among the 10, Polish and Hungarian left out |
+| MKV 40 subtitles, list ZH-TW PT CHI ZH-CN | first 32 | ✅ both Traditional, the Simplified and both Portuguese tracks kept, 8 unlisted left out (the forced English one first); track 32 shows the `zh-TW` lines |
+| MP4 11 subtitles, list ZH-TW | first 8 | ✅ the `zh-Hant` track kept, `zh-Hans` and untagged Chinese left out |
+| Subtitle Language = Auto, English menus, first subtitle track French | French track | ✅ English track |
+| `forced_subs` on, Auto, English menus (English, Portuguese and Russian audio) | first subtitle track | ✅ forced English track |
+| `forced_subs` on, Subtitle Language = French (no forced French track) | French track | ✅ subtitles off |
+| `forced_subs` on, Subtitle Language = English | English track | ✅ forced English track |
+| `forced_subs` off, Subtitle Language = English / French | English / French track | ✅ unchanged |
+| MKV TrueHD 5.1 (no Atmos) | "MLP 5.1" | ✅ "Dolby TrueHD 5.1" in the menu and info bar, sound unchanged |
+| MKV TrueHD Atmos 7.1 (Dolby Vision profile 7 sample) | "MLP" | ✅ "Dolby Atmos" in the info bar, the audio menu, the long-press Info panel and IP control |
+| Setup > Extras: Forced Subtitles Only On / Off | | ✅ switched at once (next file), `options.txt` rewritten |
+| Setup > Extras in German, Simplified Chinese, Japanese, Russian (after the restart Oppo asks for) and back to English | English texts; the Extras row read "Exit" after a language change | ✅ translated texts, Extras and Exit rows right |
 
 ### Final regression run (persistent install, fresh boot)
 

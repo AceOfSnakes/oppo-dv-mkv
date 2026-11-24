@@ -24,6 +24,15 @@ TSFile_TimeExpired = 0x163f8c; /* .plt */
 TSFile_Start = 0x14b4d0;       /* .plt */
 fgSpsDecStateNeedTrigger = 0x57ab24;
 mrSpsDecGetState = 0x579d0c;
+kaud_ret = 0x3c057c;      /* mrParseTrackEntry: after the audio count check */
+ksub_ret = 0x3c0924;      /* mrParseTrackEntry: after the subtitle count check */
+ktrk_drop = 0x3c0a64;     /* mrParseTrackEntry: track of no known type (freed, not stored) */
+orig_mkvchgsp = 0x3e05a8;
+orig_mkvstop = 0x3dfa9c;  /* CLpMkvMediaManagerProxy::mrStop */
+orig_mkvuninit = 0x3d7780; /* CLpMkvMediaManagerProxy::mrUnInit */
+orig_mkvdtor = 0x3c83f0;  /* CLpMkvMediaManagerProxy::~CLpMkvMediaManagerProxy (D1) */
+orig_mapcode = 0x1670a0;  /* .plt CLpMpcWrapper::mrMapPBACodeMode */  /* CLpMkvMediaManagerProxy::mrChangeSpStNo */
+orig_mkvsetstrm = 0x14e050; /* .plt CLpMkvMediaManagerProxy::mrMkvSetStreamInf */
 rSpsTsData = 0x757c60;          /* PG timer of the subtitle decoder: +0x18 id, +0x20 when (u64), +0x28 pending */
 mrSpsThreadTriggerEvtSetEx = 0x577054;  /* (runtime VA; Ghidra shows +0x10000) */
 SECTIONS {
@@ -37,6 +46,8 @@ SECTIONS {
   .cave4 : { *(.text.cave4) }
   . = 0x5402fc;            /* vMPCTestOperation4, 0xae8 bytes: shims, hooks, language table */
   .text : { KEEP(*(.text.entry)) *(.text .text.*) *(.rodata*) }
+  . = 0x53e410;            /* vMPCTestSendSetFileInf2Pipe, 0x898 bytes: MKV language list, forced subtitles */
+  .cave8 : { *(.langsel) }
   . = 0x542360;            /* vMPCMpgFilePbTest, 0x9fc bytes: text subtitles (tags, top position) */
   .cave6 : { *(.subtext) }
   /DISCARD/ : { *(.interp) *(.dynsym) *(.dynstr) *(.hash) *(.gnu.hash) *(.dynamic) *(.ARM.exidx*) *(.ARM.extab*) *(.comment) *(.data*) *(.bss*) *(.debug*) }
