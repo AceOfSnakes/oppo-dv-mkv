@@ -17,6 +17,11 @@ run(){ n=$1; t=$2; shift 2
        | grep -qiE "unexpected|fail|mismatch|unknown driver|not found|refus|not ready|not running|in use by"; then
     FAIL="${FAIL:+$FAIL, }$t"; return 1
   fi; return 0; }
+# SMB2/SMB3 in the Network menu: first (it does not need the player, and the player looks for servers soon after it starts)
+if [ -f $D/smbbr.sh ]; then
+  if [ "$(opt smb23)" = off ]; then log "smb23: off (smb23 = off)"
+  else run smb23 "SMB2/SMB3" sh $D/smbbr.sh on; fi
+fi
 n=0; while :; do
   P=$(ps 2>/dev/null | awk '$4 ~ /(^|\/)bdpprog\.1$/{print $1; exit}')
   [ -n "$P" ] && break
@@ -48,6 +53,12 @@ if [ -f $D/hvccfix.sh ]; then   # MKVs whose hvcC has no VPS/SPS/PPS (kernel); D
 fi
 [ -f $D/ftrfix.sh ] && run ftrfix "MP4 stop" sh $D/ftrfix.sh on           # hang at the next file after an MP4 with audio was stopped (kernel)
 [ -f $D/mp4elfix.sh ] && run mp4elfix "MP4 profile 7" sh $D/mp4elfix.sh on   # profile 7 MP4s that stop after a second (kernel)
+[ -f $D/hdr10p.sh ] && run hdr10p "HDR10+" sh $D/hdr10p.sh on              # HDR10+ lost at keyframes (kernel)
+if [ -f $D/dvhook.sh ]; then   # hdr10plus = off: MKV as HDR10; dynamic_hdr = hdr10plus: before Dolby Vision when a file has both
+  x=on; [ "$(opt hdr10plus)" = off ] && x=off; y=dv; [ "$(opt dynamic_hdr)" = hdr10plus ] && y=hdr10plus
+  [ $x$y = ondv ] || run dvhook "HDR10+ options" sh -c "sh $D/dvhook.sh h10 $x $y | grep -v '^sites='"
+fi
+[ -f $D/audedid.sh ] && [ "$(opt audio_edid_override)" = on ] && run audedid "audio EDID override" sh $D/audedid.sh on
 if [ -f $D/dvhook.sh ] && [ -f $D/languages.txt ]; then   # MP4 / MKV: which audio/subtitle tracks to keep (languages.txt)
   c=$(tr -d '\r' < $D/languages.txt | grep -v '^[[:space:]]*#' | awk 'NF{print $1}')
   [ -n "$c" ] && run dvhook "languages" sh $D/dvhook.sh langs $c

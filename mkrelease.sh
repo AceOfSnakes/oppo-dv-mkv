@@ -4,7 +4,7 @@
 set -e
 cd "$(dirname "$0")"
 V=${1:-$(cat VERSION)}
-src/kernel/build.sh; src/liblp/build.sh; sh src/dlnaiso/build.sh; sh src/bootmsg/build.sh; sh src/setupmenu/build.sh; sh src/isomusic/build.sh
+src/kernel/build.sh; src/liblp/build.sh; sh src/dlnaiso/build.sh; sh src/bootmsg/build.sh; sh src/setupmenu/build.sh; sh src/isomusic/build.sh; sh src/smb/build.sh
 python3 src/kernel/mkkinst.py; python3 src/liblp/mkinstall.py
 rm -rf dist; mkdir -p dist
 mk(){  # $1 = zip name, $2 = parts (any of dv, subs, menu), $3 = flag file (UNINSTALL / CHECKONLY) or empty
@@ -13,8 +13,9 @@ mk(){  # $1 = zip name, $2 = parts (any of dv, subs, menu), $3 = flag file (UNIN
   sed "s/@VERSION@/$V/" installer/AutoScript/install.sh > $T/AutoScript/install.sh
   cp installer/payload/bdpprog src/bootmsg/bootmsg.sh src/bootmsg/build/bootmsg.bin $P/
   sed "s/@VERSION@/$V/" installer/payload/dvmkv.sh > $P/dvmkv.sh
-  case "$2" in *dv*) cp src/liblp/build/dvhook.sh src/kernel/build/p7kel.sh src/kernel/bgfix.sh src/kernel/sarfix.sh src/kernel/arflag.sh src/kernel/dvexit.sh src/kernel/dvcm.sh src/kernel/hvccfix.sh src/kernel/ftrfix.sh src/kernel/mp4elfix.sh src/audio/alacdec.bin src/video/vidopt.sh src/isomusic/build/isomusic.sh $P/
+  case "$2" in *dv*) cp src/liblp/build/dvhook.sh src/kernel/build/p7kel.sh src/kernel/bgfix.sh src/kernel/sarfix.sh src/kernel/arflag.sh src/kernel/dvexit.sh src/kernel/dvcm.sh src/kernel/hvccfix.sh src/kernel/ftrfix.sh src/kernel/mp4elfix.sh src/kernel/hdr10p.sh src/kernel/audedid.sh src/audio/alacdec.bin src/video/vidopt.sh src/isomusic/build/isomusic.sh $P/
     cp src/dlnaiso/build/dlnaiso src/dlnaiso/dlnaiso.sh src/dlnaiso/build/dmrhook.sh src/dlnaiso/build/dmrhook.bin $P/
+    cp src/smb/build/smbbr src/smb/smbbr.sh $P/; cp src/smb/LICENCES.txt $T/oppo-dv-mkv-licences.txt
     cp src/setupmenu/xtmenu.sh src/setupmenu/build/xtload.bin src/setupmenu/build/xtmenu.bin $P/;; esac
   case "$2" in *subs*) cp src/subtitles/subs.sh $P/
     for q in 09 11 18 19 20 21 22 23; do cp src/subtitles/squares/new$q.png $P/sq$q.png; done
