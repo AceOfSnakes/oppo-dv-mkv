@@ -36,12 +36,16 @@ orig_mkvsetstrm = 0x14e050; /* .plt CLpMkvMediaManagerProxy::mrMkvSetStreamInf *
 rSpsTsData = 0x757c60;          /* PG timer of the subtitle decoder: +0x18 id, +0x20 when (u64), +0x28 pending */
 mrSpsThreadTriggerEvtSetEx = 0x577054;  /* (runtime VA; Ghidra shows +0x10000) */
 SECTIONS {
+  . = 0x52d25c;            /* vMPCTestPlayVcdThr, 0x41c bytes: Dolby Atmos in Dolby Digital Plus, audio names */
+  .cave9 : { *(.ddp) *(.ddp.rodata) }
   . = 0x530490;            /* vMPCTestDvdRwdThr, 0x958 bytes: progressive/interlaced from the H.264 / HEVC headers */
   .cave5 : { *(.text.cave5) }
   . = 0x530de8;            /* vMPCTestDvdRwdSpeedThr, 0x9e4 bytes: moov pre-scan */
   .cave3 : { *(.text.cave3) }
   . = 0x53276c;            /* vMPCTestPauseWithAThr, 0x810 bytes: MP4 tx3g styles */
   .cave7 : { *(.subtx3g) }
+  . = 0x5334d8;            /* vMPCTestPlayMpgThr, 0x2e0 bytes: HDR10+ */
+  .cave10 : { *(.h10) }
   . = 0x53f4c4;            /* vMPCTestOperation1, 0x7fc bytes: subtitle fixes (MKV VobSub palette, MP4 VobSub size) */
   .cave4 : { *(.text.cave4) }
   . = 0x5402fc;            /* vMPCTestOperation4, 0xae8 bytes: shims, hooks, language table */
@@ -49,6 +53,6 @@ SECTIONS {
   . = 0x53e410;            /* vMPCTestSendSetFileInf2Pipe, 0x898 bytes: MKV language list, forced subtitles */
   .cave8 : { *(.langsel) }
   . = 0x542360;            /* vMPCMpgFilePbTest, 0x9fc bytes: text subtitles (tags, top position) */
-  .cave6 : { *(.subtext) }
+  .cave6 : { *(.subtext) *(.subtext.rodata) }
   /DISCARD/ : { *(.interp) *(.dynsym) *(.dynstr) *(.hash) *(.gnu.hash) *(.dynamic) *(.ARM.exidx*) *(.ARM.extab*) *(.comment) *(.data*) *(.bss*) *(.debug*) }
 }

@@ -5,7 +5,7 @@
 #   mp4/build/mp4b.bin  MP4 moov pre-scan (language list), over vMPCTestDvdRwdSpeedThr (MPC self-test code)
 #   mp4/build/mp4c.bin  subtitle fixes: MKV VobSub palette on a switch, MP4 VobSub frame size, over vMPCTestOperation1
 #   mp4/build/mp4d.bin  progressive/interlaced from the H.264 / HEVC headers (MKV, MP4), over vMPCTestDvdRwdThr
-# dvhook.sh on|off|status|hvcc on|off|scan on|off|dv on|off|dvaddr|langs CODE...|forced on|off|fsaddr|mkv Checks liblp's md5 and every site's original contents, and verifies the written blobs.
+# dvhook.sh on|off|status|hvcc on|off|scan on|off|dv on|off|dvaddr|langs CODE...|forced on|off|h10 on|off dv|hdr10plus|fsaddr|mkv Checks liblp's md5 and every site's original contents, and verifies the written blobs.
 import os, struct, subprocess
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 def load(stem):
@@ -22,6 +22,8 @@ blob5 = open('mp4/build/mp4d.bin', 'rb').read()   # progressive/interlaced (same
 blob6 = open('mp4/build/mp4e.bin', 'rb').read()   # text subtitles (same ELF, section .cave6)
 blob7 = open('mp4/build/mp4f.bin', 'rb').read()   # MP4 tx3g styles (same ELF, section .cave7)
 blob8 = open('mp4/build/mp4g.bin', 'rb').read()   # MKV language list, forced subtitles (same ELF, section .cave8)
+blob9 = open('mp4/build/mp4h.bin', 'rb').read()   # Atmos in Dolby Digital Plus, audio names (same ELF, section .cave9)
+blob10 = open('mp4/build/mp4i.bin', 'rb').read()   # HDR10+ (same ELF, section .cave10)
 def bl(src, dst, op=0xeb000000):
     off = (dst - (src + 8)) >> 2
     assert -(1 << 23) <= off < (1 << 23)
@@ -45,17 +47,20 @@ CAVE7, CAVE7_LEN = 0x53276c, 0x810                       # vMPCTestPauseWithAThr
 CAVE7_ORIG = 'f04f2de98cd04de230808de20010a0e3'          # its first 16 bytes in liblp e39b358c
 CAVE8, CAVE8_LEN = 0x53e410, 0x898                       # vMPCTestSendSetFileInf2Pipe
 CAVE8_ORIG = 'f84f2de90380a0e1d0779fe500a0a0e1'          # its first 16 bytes in liblp e39b358c
+CAVE9, CAVE9_LEN = 0x52d25c, 0x41c                       # vMPCTestPlayVcdThr
+CAVE9_ORIG = 'f0402de914d04de298639fe598339fe5'          # its first 16 bytes in liblp e39b358c
+CAVE10, CAVE10_LEN = 0x5334d8, 0x2e0                       # vMPCTestPlayMpgThr
+CAVE10_ORIG = '73402de944629fe5f6a8f0eb40329fe5'          # its first 16 bytes in liblp e39b358c
 ML, MLLEN = 0x757d00, 0x100                              # mp4.c struct ml (MKV language list)
-ATMOS_STR = 0x757cd8                                     # "Dolby Atmos" (12 bytes of bss slack before struct ml)
-ATMOS_W = 0x757ce4                                       # the same in UTF-16 (24 bytes)
+NLONG, NSHORT, NWIDE = 0x757cd8, 0x757e50, 0x757fc8       # mp4.c atmos_names: the Atmos name (bss slack): ASCII 25, ASCII 16, UTF-16 50 bytes
 ST2, ST2LEN = 0x757e80, 0x144                            # mp4.c struct st
-assert len(blob) <= 0x400 and len(blob2) <= CAVE2_LEN and len(blob3) <= CAVE3_LEN and len(blob4) <= CAVE4_LEN and len(blob5) <= CAVE5_LEN and len(blob6) <= CAVE6_LEN and len(blob7) <= CAVE7_LEN and len(blob8) <= CAVE8_LEN and 0x757cd4 <= ATMOS_STR and ATMOS_STR + 12 <= ATMOS_W and ATMOS_W + 24 <= ML and ML + MLLEN <= ST and ST + STLEN <= ST2 and ST2 + ST2LEN <= 0x758000
+assert len(blob) <= 0x400 and len(blob2) <= CAVE2_LEN and len(blob3) <= CAVE3_LEN and len(blob4) <= CAVE4_LEN and len(blob5) <= CAVE5_LEN and len(blob6) <= CAVE6_LEN and len(blob7) <= CAVE7_LEN and len(blob8) <= CAVE8_LEN and len(blob9) <= CAVE9_LEN and len(blob10) <= CAVE10_LEN and 0x757cd4 <= NLONG and NLONG + 25 <= ML and ML + MLLEN <= ST and ST + STLEN <= NSHORT and NSHORT + 16 <= ST2 and ST2 + ST2LEN <= NWIDE and NWIDE + 50 <= 0x758000
 hx = lambda b: ''.join('\\x%02x' % c for c in b)
 
 # code sites: (VA, original 4 bytes, new 4 bytes)
 code = []
 for va, orig, h in [(0x3c00d4, 0x16863c, 'h1_skip'), (0x3d252c, 0x163164, 'h2_mmed'), (0x3c99a4, 0x157f98, 'h3_vinfo')]:
-    code.append((va, bl(va, orig), bl(va, syms[h])))
+    code.append((va, bl(va, orig), bl(va, syms2['k_mmed'] if h == 'h2_mmed' else syms[h])))   # h2_mmed: through h10_pick
 # MKV Tracks (H0): the language list's read-ahead (k_tracks, mp4.c mkv_scan), then dvhook's h0_tracks
 for va in (0x3c57ec, 0x3c2ff0):
     code.append((va, bl(va, 0x158dd8), bl(va, syms2['k_tracks'])))
@@ -65,6 +70,12 @@ for va, h in [(0x42c470, 'mp4_s1'), (0x42eb08, 'mp4_s2')]:                      
 # read-ahead did not choose; forced subtitles at the start with Subtitle Language = Auto (mkv_start)
 # MKV TrueHD (A_TRUEHD) was handed to the menus as PB code 0xb, which the player names "MLP" (DVD-Audio); 0x1a is its
 # "Dolby TrueHD". Both map to the same decoder control (eMapAudioCodec2Ctrl: 0); the decoder type comes from the codec ID.
+# HDR10+ MKV: the source type for the output choice (h10_map): 2 HDR10 or 5 HDR10+
+code.append((0x5275dc, struct.pack('<I', 0xe3a00002), bl(0x5275dc, syms2['k_hdr'], B_AL)))   # mov r0, #2 -> b k_hdr
+code.append((0x3bac44, struct.pack('<I', 0xe3a00006), bl(0x3bac44, syms2['k_ddp'])))         # mov r0, #6 -> bl k_ddp: 6 / 8 (Atmos)
+# an audio track without a Language element: English (Matroska's default), as in the subtitle menu; it had no name
+code.append((0x3c0894, struct.pack('<I', 0x05c9c088), bl(0x3c0894, syms2['k_alang'], 0x0b000000)))   # strbeq ip, [sb, #0x88] -> bleq
+for va, w in ((0x3c0898, 0x05c9c089), (0x3c089c, 0x05c9c08a)): code.append((va, struct.pack('<I', w), struct.pack('<I', 0xe1a00000)))   # -> nop
 code.append((0x3bac6c, struct.pack('<I', 0xe3a0000b), bl(0x3bac6c, syms2['k_thd'])))         # mov r0, #11 -> bl k_thd: 0x1a / 8 (Atmos)
 code.append((0x4e7fb4, bl(0x4e7fb4, 0x1670a0), bl(0x4e7fb4, syms2['k_aelm'])))               # vMsgAElmStrmCallback: decoder's audio name
 code.append((0x3b68e4, struct.pack('<I', 0x9a00000b), struct.pack('<I', 0xea00000b)))        # mrParseTrackAudio: bls -> b
@@ -192,11 +203,19 @@ TW 0x7ba644:37b5054601aa3a200df10201f8f72afc 0x7ba3b8:37b5054601aa37200df10201f8
 JP 0x7ba668:37b5054601aa3a200df10201f8f718fc 0x7ba3dc:37b5054601aa37200df10201f8f75efd 0x125b068 0x1a5ecdc 0x7d99f0:f1fafd00:0xfdfaf1 0x7da338:f1fafd00:0xfdfaf1 0x7df674:f1fafd00:0xfdfaf1 0x8f4364:f1fafd00:0xfdfaf1 0xa72ec0:f1fafd00:0xfdfaf1 0x100fc98:a486ff00:0xff86a4   # JP
 US 0x7ba648:37b5054601aa3a200df10201f8f72afc 0x7ba3bc:37b5054601aa37200df10201f8f770fd 0x125b068 0x1a5ecdc 0x7d99dc:d1fefd00:0xfdfed1 0x7da328:d1fefd00:0xfdfed1 0x7df664:d1fefd00:0xfdfed1 0x8f4618:d1fefd00:0xfdfed1 0xa73670:d1fefd00:0xfdfed1 0x10100a0:cc8aff00:0xff8acc   # US
 CXUHD 0x7ad1a4:37b5054601aa3a200df10201faf73ef9 0x7acf18:37b5054601aa37200df10201faf784fa 0x122bb00 0x1a2e05c 0x7cd060:46c0fb00:0xfbc046 0x7cdeb4:46c0fb00:0xfbc046 0x7d0f6c:46c0fb00:0xfbc046 0x8dba3c:46c0fb00:0xfbc046 0xa52cf0:46c0fb00:0xfbc046 0xfea018:1034fd00:0xfd3410   # CXUHD"
+# subtitle menu rows (r_row, mp4.c sub_row): where the player program ends a row with " " (Thumb), RU EU AU CN TW JP US
+# CXUHD; taken only with these 22 bytes there and its string table literal (+0x28) as in the program's line above
+ROWS="0xa93b88 0xa93bb8 0xa93b90 0xa93b70 0xa93b60 0xa94044 0xa943b0 0xa73980"
+ROW0=002cf4d0074b26a81a78074b02f54c52243253f82210   # stock
+ROW1=00e000bfdff800f0   # b +0 ; nop ; ldr.w pc, [pc] (then the address of r_row)
+rowsite(){{ for a in $ROWS; do a=$((a)); [ "$(rd $((a + 0x28)) 4)" = "$(le $STRT)" ] || continue
+    c=$(rd $a 22); [ "$c" = $ROW0 ] && {{ ROW=$a; return 0; }}
+    case $c in $ROW1????????02f54c52243253f82210) ROW=$a; return 0;; esac; done; ROW=; return 1; }}
 # the running program's line -> SUBF OSDF LANGT STRT SDDS (nothing is patched in a program without a full match)
 playok(){{ [ "$(rd $((${{2%%:*}})) 16)" = ${{2#*:}} ] && [ "$(rd $((${{3%%:*}})) 16)" = ${{3#*:}} ] && [ "$(rd $(($4 + 0x7e * 10)) 10)" = 7e007e00656e67656e5f ] || return 1
   SUBF=$((${{2%%:*}})); OSDF=$((${{3%%:*}})); LANGT=$(($4)); STRT=$(($5)); SDDS=; shift 5
   for e in "$@"; do r=${{e#*:}}; c=$(rd $((${{e%%:*}})) 4)
-    [ "$c" = "${{r%%:*}}" ] || [ "$c" = "$(le $((B + {ATMOS_STR:#x})))" ] || return 1; done
+    [ "$c" = "${{r%%:*}}" ] || [ "$c" = "$(le $((B + {NLONG:#x})))" ] || [ "$c" = "$(le $((B + {NSHORT:#x})))" ] || return 1; done
   SDDS="$*"; return 0; }}
 SUBF=; OI=$IFS; IFS='
 '
@@ -214,10 +233,11 @@ state(){{ s=ok; for e in $SITES; do a=$((B + ${{e%%:*}})); r=${{e#*:}}; c=$(rd $
 restore(){{ for e in $SITES; do a=$((B + ${{e%%:*}})); r=${{e#*:}}; [ "$(rd $a 4)" = "${{r#*:}}" ] && w4 $a "$(esc ${{r%%:*}})"; done
   for e in $DSITES; do a=$((B + ${{e%%:*}})); r=${{e#*:}}; o=${{r%%:*}}; [ "$(rd $a 4)" = "$(le $((B + ${{r#*:}})))" ] && wv $a $((B + ${{o%%,*}})); done
   for e in $ZSITES; do a=$((B + ${{e%%:*}})); [ "$(rd $a 4)" = "$(le $((B + ${{e#*:}})))" ] && wv $a 0; done
-  for e in $SDDS; do a=$((${{e%%:*}})); [ "$(rd $a 4)" = "$(le $((B + {ATMOS_STR:#x})))" ] && wv $a $((${{e##*:}})); done
+  for e in $SDDS; do a=$((${{e%%:*}})); c=$(rd $a 4); {{ [ "$c" = "$(le $((B + {NLONG:#x})))" ] || [ "$c" = "$(le $((B + {NSHORT:#x})))" ]; }} && wv $a $((${{e##*:}})); done
   [ -n "$SDDS" ] || return 0
+  rowsite && case $(rd $ROW 8) in $ROW1) wv $ROW 0xd0f42c00; wv $((ROW + 4)) 0xa8264b07; wv $((ROW + 8)) 0x4b07781a;; esac
   T=$((STRT + 936 * 48))
-  [ "$(rd $T 4)" = "$(le $((B + {ATMOS_W:#x})))" ] && [ -f /tmp/dvhook-s936.bin ] && dd if=/tmp/dvhook-s936.bin of=$M bs=1 seek=$T conv=notrunc 2>/dev/null; }}
+  [ "$(rd $T 4)" = "$(le $((B + {NWIDE:#x})))" ] && [ -f /tmp/dvhook-s936.bin ] && dd if=/tmp/dvhook-s936.bin of=$M bs=1 seek=$T conv=notrunc 2>/dev/null; }}
 case "$1" in
 on)
   st=$(state) || {{ echo "$st"; exit 1; }}
@@ -229,6 +249,8 @@ on)
   c=$(rd $((B + {CAVE6:#x})) 16); [ "$c" = {CAVE6_ORIG} ] || [ "$c" = {blob6[:16].hex()} ] || {{ echo "unexpected code at {CAVE6:#x}: $c"; exit 1; }}
   c=$(rd $((B + {CAVE7:#x})) 16); [ "$c" = {CAVE7_ORIG} ] || [ "$c" = {blob7[:16].hex()} ] || {{ echo "unexpected code at {CAVE7:#x}: $c"; exit 1; }}
   c=$(rd $((B + {CAVE8:#x})) 16); [ "$c" = {CAVE8_ORIG} ] || [ "$c" = {blob8[:16].hex()} ] || {{ echo "unexpected code at {CAVE8:#x}: $c"; exit 1; }}
+  c=$(rd $((B + {CAVE9:#x})) 16); [ "$c" = {CAVE9_ORIG} ] || [ "$c" = {blob9[:16].hex()} ] || {{ echo "unexpected code at {CAVE9:#x}: $c"; exit 1; }}
+  c=$(rd $((B + {CAVE10:#x})) 16); [ "$c" = {CAVE10_ORIG} ] || [ "$c" = {blob10[:16].hex()} ] || {{ echo "unexpected code at {CAVE10:#x}: $c"; exit 1; }}
   restore
   printf '{hx(blob)}' | dd of=$M bs=1 seek=$((B + {CAVE:#x})) conv=notrunc 2>/dev/null
   [ "$(rd $((B + {CAVE:#x})) {len(blob)})" = "{blob.hex()}" ] || {{ echo "blob verify failed"; exit 1; }}
@@ -246,6 +268,10 @@ on)
   [ "$(rd $((B + {CAVE7:#x})) {len(blob7)})" = "{blob7.hex()}" ] || {{ echo "blob verify failed (tx3g styles)"; exit 1; }}
   printf '{hx(blob8)}' | dd of=$M bs=1 seek=$((B + {CAVE8:#x})) conv=notrunc 2>/dev/null
   [ "$(rd $((B + {CAVE8:#x})) {len(blob8)})" = "{blob8.hex()}" ] || {{ echo "blob verify failed (MKV language list)"; exit 1; }}
+  printf '{hx(blob9)}' | dd of=$M bs=1 seek=$((B + {CAVE9:#x})) conv=notrunc 2>/dev/null
+  [ "$(rd $((B + {CAVE9:#x})) {len(blob9)})" = "{blob9.hex()}" ] || {{ echo "blob verify failed (Dolby Digital Plus)"; exit 1; }}
+  printf '{hx(blob10)}' | dd of=$M bs=1 seek=$((B + {CAVE10:#x})) conv=notrunc 2>/dev/null
+  [ "$(rd $((B + {CAVE10:#x})) {len(blob10)})" = "{blob10.hex()}" ] || {{ echo "blob verify failed (HDR10+)"; exit 1; }}
   dd if=/dev/zero of=$M bs=1 seek=$((B + {ST:#x})) count={STLEN} conv=notrunc 2>/dev/null
   dd if=/dev/zero of=$M bs=1 seek=$((B + {ST2:#x})) count={ST2LEN} conv=notrunc 2>/dev/null
   dd if=/dev/zero of=$M bs=1 seek=$((B + {ML:#x})) count={MLLEN} conv=notrunc 2>/dev/null
@@ -258,22 +284,33 @@ on)
   T=$((STRT + 936 * 48)); sd=
   if [ -n "$SDDS" ]; then n=0
     while [ "$(rd $T 4)" = 00000000 ] && [ $n -lt 20 ]; do sleep 1; n=$((n + 1)); done
-    if [ "$(rd $T 4)" = "$(le $((B + {ATMOS_W:#x})))" ]; then sd=1; else
+    if [ "$(rd $T 4)" = "$(le $((B + {NWIDE:#x})))" ]; then sd=1; else
       sd=1; i=0; while [ $i -lt 12 ]; do a=$(rd $((T + i * 4)) 4); [ ${{#a}} = 8 ] || a=00000000; a=$((0x$(echo $a | sed 's/\\(..\\)\\(..\\)\\(..\\)\\(..\\)/\\4\\3\\2\\1/')))
         [ "$(rd $a 10)" = 53004400440053000000 ] || sd=; i=$((i + 1)); done; fi
   fi
   if [ -n "$sd" ]; then
     wv $((B + {ML + 0x2c:#x})) $((SUBF | 1)); wv $((B + {ML + 0x30:#x})) $((OSDF | 1)); wv $((B + {ML + 0x34:#x})) $LANGT
-    # audio code 8 (SDDS, never used here; mkv_thd gives it to MKV TrueHD with Atmos) is named "Dolby Atmos": the
-    # program's pointers to its names (front display, IP control, info bar, long-press info panel), and osdmsg string
-    # 936 in its 12 languages (the info bar; originals kept in /tmp for off, the table is built at each boot)
-    printf 'Dolby Atmos\\000' | dd of=$M bs=1 seek=$((B + {ATMOS_STR:#x})) conv=notrunc 2>/dev/null
-    printf 'D\\000o\\000l\\000b\\000y\\000 \\000A\\000t\\000m\\000o\\000s\\000\\000\\000' | dd of=$M bs=1 seek=$((B + {ATMOS_W:#x})) conv=notrunc 2>/dev/null
-    for e in $SDDS; do a=$((${{e%%:*}})); r=${{e#*:}}; [ "$(rd $a 4)" = "${{r%%:*}}" ] && wv $a $((B + {ATMOS_STR:#x})); done
-    if [ "$(rd $T 4)" != "$(le $((B + {ATMOS_W:#x})))" ]; then
+    # audio code 8 (SDDS, never used here; mkv_thd gives it to MKV TrueHD and Dolby Digital Plus with Atmos): the
+    # program's pointers to its name (long: audio text, long-press info panel; short: front display, IP control), and
+    # osdmsg string 936 in its 12 languages (info bar, audio menu; originals kept in /tmp for off, the table is built
+    # at each boot) point at our buffers, which atmos_names fills for each file ("Dolby Atmos" until then)
+    printf 'Dolby Atmos\\000' | dd of=$M bs=1 seek=$((B + {NLONG:#x})) conv=notrunc 2>/dev/null
+    printf 'Dolby Atmos\\000' | dd of=$M bs=1 seek=$((B + {NSHORT:#x})) conv=notrunc 2>/dev/null
+    printf 'D\\000o\\000l\\000b\\000y\\000 \\000A\\000t\\000m\\000o\\000s\\000\\000\\000' | dd of=$M bs=1 seek=$((B + {NWIDE:#x})) conv=notrunc 2>/dev/null
+    i=0; for e in $SDDS; do a=$((${{e%%:*}})); r=${{e#*:}}; i=$((i+1)); case $i in 4|6) v={NLONG:#x};; *) v={NSHORT:#x};; esac
+      [ "$(rd $a 4)" = "${{r%%:*}}" ] && wv $a $((B + v)); done
+    if [ "$(rd $T 4)" != "$(le $((B + {NWIDE:#x})))" ]; then
       dd if=$M bs=1 skip=$T count=48 of=/tmp/dvhook-s936.bin 2>/dev/null
-      i=0; while [ $i -lt 12 ]; do wv $((T + i * 4)) $((B + {ATMOS_W:#x})); i=$((i + 1)); done
+      i=0; while [ $i -lt 12 ]; do wv $((T + i * 4)) $((B + {NWIDE:#x})); i=$((i + 1)); done
     fi
+    # what the TV supports (h10_tv): the getter and its handle
+    for f in 0x5e3e88 0x5d87d0; do [ "$(rd $((f)) 4)" = 60feffea ] && {{ wv $((B + {syms2['h_scom']:#x})) $((f)); wv $((B + {syms2['h_hand']:#x})) $((STRT - 0x778c)); break; }}; done
+    # subtitle menu rows: format and "Forced"
+    if rowsite; then
+      wv $((B + {syms2['r_site']:#x})) $((ROW + 0x24)); wv $((B + {syms2['r_back']:#x})) $((ROW - 0x12 + 1))
+      w=$((B + {syms2['r_row']:#x})); wv $((ROW + 8)) $w; wv $((ROW + 4)) 0xf000f8df; wv $ROW 0xbf00e000
+      [ "$(rd $ROW 12)" = "$ROW1$(le $w)" ] || echo "subtitle menu rows: write failed"
+    else echo "subtitle menu rows: not supported on this player program"; fi
   else echo "MKV subtitle start: not supported on this player program (stock choice)"; fi
   echo "dvhook ON";;
 forced)  # MKV: start on the forced subtitles of the Subtitle Language (Auto: the menu language), or none
@@ -281,6 +318,11 @@ forced)  # MKV: start on the forced subtitles of the Subtitle Language (Auto: th
   case "$2" in on) v='\\x01';; off) v='\\x00';; *) echo "usage: forced on|off"; exit 1;; esac
   printf "$v" | dd of=$M bs=1 seek=$((B + {ML + 0x29:#x})) conv=notrunc 2>/dev/null
   echo "forced subtitles only: $([ "$(rd $((B + {ML + 0x29:#x})) 1)" = 01 ] && echo on || echo off)";;
+h10)  # HDR10+ output from MKV (TV with HDR10+); dv|hdr10plus: which one when a file has both
+  [ "$(state)" = ok ] || {{ echo "dvhook is not on"; exit 1; }}
+  v=0; [ "$2" = off ] && v=1; [ "$3" = hdr10plus ] && v=$((v + 2))
+  printf "\\x0$v" | dd of=$M bs=1 seek=$((B + {ML + 0xfc:#x})) conv=notrunc 2>/dev/null
+  echo "HDR10+ from MKV: $([ $((v & 1)) = 1 ] && echo off || echo on), preferred: $([ $((v & 2)) = 2 ] && echo HDR10+ || echo Dolby Vision)";;
 fsaddr)  # where the forced_subs byte is (for the Setup page, which switches it at once), when the patch is on
   [ "$(state)" = ok ] || {{ echo "dvhook is not on"; exit 1; }}
   echo $((B + {ML + 0x29:#x})); exit 0;;
