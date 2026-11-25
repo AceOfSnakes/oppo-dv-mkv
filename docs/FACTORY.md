@@ -7,19 +7,20 @@ remote has. With the factory menu shortcut installed, the normal remote opens it
 
 |   English   | Deutch |  Russian |
 | :----------:   | :------: | :---------:  |
-| ![Main EN](./images/main-en.png) | ![Main DE](./images/main-de.png) | ![Main RU](./images/main-ru.png)
+| [![Main EN](./images/preview/main-en.png)](./images/main-en.png) | [![Main DE](./images/preview/main-de.png)](./images/main-de.png)| [![Main RU](./images/preview/main-ru.png)](./images/main-ru.png)
 
 2. Move the cursor to the **second item, Gapless Playback**. Do not press Enter.
 
 |   English   | Deutch |  Russian |
 | :----------:   | :------: | :---------:  |
-| ![Gap EN](./images/gap-en.png) | ![Gap DE](./images/gap-de.png) | ![Gap RU](./images/gap-ru.png)
+| [![Gap EN](./images/preview/gap-en.png)](./images/gap-en.png) | [![Gap DE](./images/preview/gap-de.png)](./images/gap-de.png) | [![Gap RU](./images/preview/gap-ru.png)](./images/gap-ru.png)
 
 3. Press **0 0 0 0**.
 
 |   English   | Deutch |  Russian |
 | :----------:   | :------: | :---------:  |
-| ![Facttory EN](./images/factory-en.png) | ![Factory DE](./images/factory-de.png) | ![Factory RU](./images/factory-ru.png)
+| [![Factory EN](./images/preview/factory-en.png)](./images/factory-en.png) | [![Factory DE](./images/preview/factory-de.png)](./images/factory-de.png) | [![Factory RU](./images/preview/factory-ru.png)](./images/factory-ru.png)
+
 
 The page shows the firmware version, sub version and loader version, the DVD and Blu-ray region codes, and some
 service buttons. Close it with Return.
