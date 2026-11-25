@@ -79,12 +79,12 @@ _Static_assert(sizeof(struct item) == 0x14, "item");
 _Static_assert(sizeof(struct desc) == 0x38, "desc");
 
 // ---- the options --------------------------------------------------------------------------------------------------
-#define NOPT  7
+#define NOPT  8
 #define NVMAX 13
 #define XT_ROW 6                   /* "Extras" goes before Exit */
 #define ID_PAGE 0x1f0              /* menu ids nobody uses (Setup's run 1..0xf8, other menus from 0x5dd) */
 #define ID_OPT0 0x1f1
-enum { LIVE_NONE, LIVE_DV, LIVE_L5 };
+enum { LIVE_NONE, LIVE_DV, LIVE_L5, LIVE_FS };
 struct opt {
     const char *key;
     const u16 *label, *help;
@@ -99,6 +99,8 @@ static const struct opt O[NOPT] = {
       u"Dolby Vision from MKV files. Off: the player's own way", 2, 0, LIVE_DV, ONOFF },
     { "dv_l5", u"Dolby Vision L5",
       u"Active area (L5) to the TV in TV-led Dolby Vision. Off: Oppo's way", 2, 0, LIVE_L5, ONOFF },
+    { "forced_subs", u"Forced Subtitles Only",
+      u"MKV: start on the forced subtitles of the Subtitle Language, or none", 2, 1, LIVE_FS, ONOFF },
     { "native_25p", u"Native 25p / 30p",
       u"25 and 30 fps HD video at its own rate (after a restart)", 2, 1, LIVE_NONE, ONOFF },
     { "menu_refresh", u"Home Menu Refresh",
@@ -116,6 +118,8 @@ static const struct opt O[NOPT] = {
       u"Blu-ray, UHD and DVD ISO files over DLNA (after a restart)", 2, 0, LIVE_NONE, ONOFF },
 };
 
+#include "xtext.h"
+
 // ---- header (written and read by xtmenu.sh) -------------------------------------------------------------------------
 int xt_init(u32 a);
 struct xhdr {
@@ -132,8 +136,9 @@ struct xhdr {
     u32 dv_addr;                   // +144 dvhook's "Dolby Vision from MKV off" byte (liblp), 0 = not on
     u32 l5_pa;                     // +148 physical address of dvcm's L5 word (bdpdrv1), 0 = not on
     char ver[24];                  // +152 oppo-dv-mkv version
+    u32 fs_addr;                   // +176 dvhook's forced_subs byte (liblp), 0 = not on
 };
-_Static_assert(__builtin_offsetof(struct xhdr, inserts) == 132 && __builtin_offsetof(struct xhdr, ver) == 152, "xtmenu.sh");
+_Static_assert(__builtin_offsetof(struct xhdr, inserts) == 132 && __builtin_offsetof(struct xhdr, ver) == 152 && __builtin_offsetof(struct xhdr, fs_addr) == 176, "xtmenu.sh");
 __attribute__((section(".hdr"), used)) struct xhdr X = {
     0x4e4d5458, 2, xt_init, 0, 0, 0, 0, { 0 }, "/mnt/ubi_boot/oppo-dv-mkv/options.txt" };
 
@@ -182,7 +187,14 @@ static u32 sc3(u32 n, u32 a, u32 b, u32 c)
 #define SYS_MPROTECT 125
 #define SYS_CACHEFLUSH 0x0f0002
 static u32 slen(const char *s) { u32 n = 0; while (s[n]) n++; return n; }
-static const u16 *vtext(int i, int v) { return O[i].sid[v] ? STR(O[i].sid[v]) : O[i].txt[v]; }
+static u32 lang(void) { u32 l = GW(0x14); return l < NLANG ? l : 0; }   // Setup's language (osdmsg.bin order)
+static const u16 *vtext(int i, int v)
+{
+    if (O[i].sid[v]) return STR(O[i].sid[v]);
+    const char *k = O[i].val[v];
+    return k[0] == 's' && k[1] == 't' ? T_STOCK[lang()] : O[i].txt[v];   // "stock"
+}
+static void mk_xhelp(void);
 static void help(const u16 *s) { if (s) DO_CMD(GW(0x70), CMD_SETTEXT, (u32)s, W2SLEN(s) & 0xffff); }
 static void hints(u32 v58, u32 v5c, u32 v60, u32 v64)
 {
@@ -293,12 +305,13 @@ static int save(void)
     sc3(SYS_CLOSE, fd, 0, 0);
     return (i32)sc3(SYS_RENAME, (u32)tmp, (u32)X.path, 0);
 }
-// Dolby Vision MKV and L5 at once: dvhook's flag byte is in this process (liblp); dvcm's L5 word is in the driver's
+// Dolby Vision MKV, forced subtitles and L5 at once: dvhook's flag bytes are in this process (liblp); dvcm's L5 word is in the driver's
 // code, written through /dev/mem like dvcm.sh does (only when it holds one of its two known values)
 static void apply_live(int i)
 {
     int on = X.cur[i] == 0;
     if (O[i].live == LIVE_DV && X.dv_addr) *(volatile u8 *)X.dv_addr = on ? 0 : 1;
+    if (O[i].live == LIVE_FS && X.fs_addr) *(volatile u8 *)X.fs_addr = on ? 1 : 0;
     if (O[i].live == LIVE_L5 && X.l5_pa) {
         i32 fd = (i32)sc3(SYS_OPEN, (u32)"/dev/mem", 2, 0);
         u32 w = 0, nw = on ? 0xe2423006u : 0xe2423005u;     // sub r3, r2, #6 keeps L5; #5 is Oppo's (drops it)
@@ -324,6 +337,17 @@ static void root_row(int row)   // what Oppo's highlight / get-focus do for a ro
         FRONT_TXT(0x5c9);
     }
 }
+// After a change of the player's language Setup writes its own category texts into rows 0..6 (row 6 = its Exit text),
+// so our row read "Exit" twice. Every highlight / focus of the category list puts our two texts back first.
+#define S_EXIT 1481
+static void root_texts(u32 h)
+{
+    u32 l = lang();
+    rcol[2] = T_EXTRAS[l]; mk_xhelp();                    // the page's own texts follow the language too
+    for (int i = 0; i < NOPT; i++) { pcol[i][2] = T_LABEL[i][l]; for (int v = 0; v < O[i].n; v++) ocol[i][v][2] = vtext(i, v); }
+    DO_CMD(h, MC_ITEM_TEXT, (u32)XT_ROW << 16 | 2, (u32)rcol[2]);
+    DO_CMD(h, MC_ITEM_TEXT, (u32)(XT_ROW + 1) << 16 | 2, (u32)STR(S_EXIT));
+}
 static int root_sel(u32 *c, u16 *p, u32 a, u32 b)
 {
     if (!inserted) return ROOT_SEL(c, p, a, b);
@@ -335,6 +359,7 @@ static int root_hlt(u32 *c, u32 a, u32 b, u32 d)
 {
     u16 row = 0;
     if (!inserted) return ROOT_HLT(c, a, b, d);
+    root_texts(c[2]);
     DO_CMD(c[2], MC_GET_HLT, (u32)&row, 0);
     if (row < XT_ROW) return ROOT_HLT(c, a, b, d);
     u32 v[4] = { 1, 0, 0, 0 };
@@ -349,6 +374,7 @@ static int root_foc(u32 *c, u32 a, u32 b, u32 d)
 {
     u16 row = 0;
     if (!inserted) return ROOT_FOC(c, a, b, d);
+    root_texts(c[2]);
     DO_CMD(c[2], MC_GET_HLT, (u32)&row, 0);
     if (row < XT_ROW) return ROOT_FOC(c, a, b, d);
     u32 sub = 0;
@@ -365,7 +391,10 @@ static int root_foc(u32 *c, u32 a, u32 b, u32 d)
 // ---- our page -------------------------------------------------------------------------------------------------------
 static void page_values(u32 h)
 {
-    for (int i = 0; i < NOPT; i++) DO_CMD(h, MC_ITEM_TEXT, (u32)i << 16 | 4, (u32)vtext(i, X.cur[i]));
+    for (int i = 0; i < NOPT; i++) {
+        DO_CMD(h, MC_ITEM_TEXT, (u32)i << 16 | 2, (u32)T_LABEL[i][lang()]);
+        DO_CMD(h, MC_ITEM_TEXT, (u32)i << 16 | 4, (u32)vtext(i, X.cur[i]));
+    }
 }
 static void styles(u32 h, int page)   // Oppo's pre-create for a page (Playback Setup) or an option list (Auto Play)
 {
@@ -387,7 +416,7 @@ static void styles(u32 h, int page)   // Oppo's pre-create for a page (Playback 
 static void page_row(u16 row)
 {
     if (row >= NOPT) row = 0;
-    help(O[row].help);
+    help(T_HELP[row][lang()]);
     hints(0, 0, 0, 0);
     F_NEXT = 1; F_25 = 0;
 }
@@ -456,6 +485,7 @@ static int op_pre(u32 *c)
 {
     int i = opt_of(c[3]);
     styles(c[2], 0);
+    if (i >= 0) for (int v = 0; v < O[i].n; v++) DO_CMD(c[2], MC_ITEM_TEXT, (u32)v << 16 | 2, (u32)vtext(i, v));
     if (i >= 0) DO_CMD(c[2], MC_CHECK, X.cur[i], 1);
     return 0;
 }
@@ -479,7 +509,7 @@ static int op_sel(u32 *c, u16 *p)
 static int op_hlt(u32 *c)
 {
     int i = opt_of(c[3]);
-    const u16 *h = i >= 0 ? O[i].help : 0;
+    const u16 *h = i >= 0 ? T_HELP[i][lang()] : 0;
     if (F_FOCUS) {
         F_FOCUS = 0;
         HIDE_ALL();
@@ -520,13 +550,13 @@ static void build(void)
         d->id = ID_OPT0 + i; d->style = 0x00208002; d->ctype = CT_OPT;
         d->h = 0x48; d->w = 0x1c2; d->dist = 6; d->count = O[i].n; d->items = oitem[i];
         d->ncols = 5; d->cols = OPT_COLS; d->r28 = 1; d->per_page = 7; d->r2c = 0x01000203;
-        pcol[i][2] = O[i].label; pcol[i][3] = BULLET; pcol[i][4] = vtext(i, X.cur[i]);
+        pcol[i][2] = T_LABEL[i][lang()]; pcol[i][3] = BULLET; pcol[i][4] = vtext(i, X.cur[i]);
         pitem[i].cols = pcol[i]; pitem[i].sub = d;
     }
     pdesc.id = ID_PAGE; pdesc.style = 0x10208002; pdesc.ctype = CT_PAGE;
     pdesc.h = 0x48; pdesc.w = 0x3be; pdesc.dist = 6; pdesc.count = NOPT; pdesc.items = pitem;
     pdesc.ncols = 5; pdesc.cols = PAGE_COLS; pdesc.r28 = 1; pdesc.per_page = 7; pdesc.r2c = 0x01000203; pdesc.r30 = 0xfe3e;
-    rcol[2] = u"Extras";
+    rcol[2] = T_EXTRAS[lang()];
     ritem.cols = rcol; ritem.sub = &pdesc;
     static const void *const pf[7] = { pg_sel, pg_pre, pg_hlt, pg_foc, pg_lose, nop, nop };
     static const void *const of[7] = { op_sel, op_pre, op_hlt, op_foc, op_lose, nop, nop };
@@ -534,12 +564,16 @@ static void build(void)
     for (int e = 0; e < 7; e++) { cbt[k].key = ID_PAGE << 8 | e; cbt[k++].fn = pf[e]; }
     for (int i = 0; i < NOPT; i++)
         for (int e = 0; e < 7; e++) { cbt[k].key = (ID_OPT0 + i) << 8 | e; cbt[k++].fn = of[e]; }
-    // help line of the Extras row: "oppo-dv-mkv <version> options"
-    static const char a[] = "oppo-dv-mkv ", z[] = " options";
+    mk_xhelp();
+}
+// help line of the Extras row: "oppo-dv-mkv <version> options", the last word in Setup's language
+static void mk_xhelp(void)
+{
+    static const char a[] = "oppo-dv-mkv ";
     u32 n = 0;
     for (const char *s = a; *s; ) xhelp[n++] = *s++;
     for (u32 i = 0; i < sizeof(X.ver) && X.ver[i] && n < 40; i++) xhelp[n++] = (u8)X.ver[i];
-    for (const char *s = z; *s; ) xhelp[n++] = *s++;
+    for (const u16 *s = T_OPTIONS[lang()]; *s && n < 63; ) xhelp[n++] = *s++;
     xhelp[n] = 0;
 }
 static int cb_has(u32 key)

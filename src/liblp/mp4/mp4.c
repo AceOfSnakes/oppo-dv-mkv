@@ -19,6 +19,8 @@ typedef unsigned char u8; typedef unsigned short u16; typedef unsigned int u32; 
 #define CAVE3 __attribute__((section(".text.cave3"), noinline))   /* moov pre-scan: in vMPCTestDvdRwdSpeedThr (link.ld) */
 #define CAVE4 __attribute__((section(".text.cave4"), noinline))   /* subtitle fixes: in vMPCTestOperation1 (link.ld) */
 #define CAVE5 __attribute__((section(".text.cave5"), noinline))   /* progressive/interlaced: in vMPCTestDvdRwdThr (link.ld) */
+#define CAVE6 __attribute__((section(".subtext"), noinline))   /* text subtitles: in vMPCMpgFilePbTest (link.ld) */
+#define CAVE7 __attribute__((section(".subtx3g"), noinline))   /* MP4 tx3g styles: in vMPCTestPauseWithAThr (link.ld) */
 #include "iso639.h"
 
 #define ST_VA       0x757e80u   /* RW bss slack after dvhook's state (0x757e00..0x757e4c) */
@@ -74,9 +76,14 @@ struct st {
     short pgdy;      /* lines the current PGS epoch is moved down (Subtitle Shift; pg_feed) */
     u8 vprog;        /* the MP4's video is progressive (pre-scan: its avcC / hvcC; vid_trak) */
     u32 prov;        /* end time given to the tx3g line on screen for want of a next sample (mp4_srt / tx_end); 0 = none */
+    u8 top;          /* the text line being decoded asked for the top of the screen ({\an7..9}, {\a5..7}; txt_dec) */
+    u8 wlim;         /* word wrap width in narrow characters (0 = WRAP_DEF; dvhook.sh can set it) */
+    u8 rsv3[2];
+    u32 thits[2];    /* text lines cleaned, lines drawn at the top */
+    u32 tdec;        /* the subtitle decoder of the last text line (for reading its fields while testing) */
 };
 #define ST(base) ((volatile struct st *)((base) + ST_VA))
-_Static_assert(__builtin_offsetof(struct st, pgmix) == 0xe6 && __builtin_offsetof(struct st, pgsync) == 0xe7 && __builtin_offsetof(struct st, sps) == 0x128 && __builtin_offsetof(struct st, pgdy) == 0x12c && __builtin_offsetof(struct st, prov) == 0x130 && sizeof(struct st) == 0x134, "struct st layout (shims.S, mkinstall.py)");
+_Static_assert(__builtin_offsetof(struct st, pgmix) == 0xe6 && __builtin_offsetof(struct st, pgsync) == 0xe7 && __builtin_offsetof(struct st, sps) == 0x128 && __builtin_offsetof(struct st, pgdy) == 0x12c && __builtin_offsetof(struct st, prov) == 0x130 && __builtin_offsetof(struct st, top) == 0x134 && sizeof(struct st) == 0x144, "struct st layout (shims.S, mkinstall.py)");
 
 struct langmsg { u32 type; u16 idx; u8 c[3]; };
 typedef void (*send_t)(void *obj, u32 msg, void *data);
@@ -93,6 +100,31 @@ static __attribute__((noinline)) u32 iso2(u32 l, u32 base) {  /* packed ISO 639-
         if (k < l) lo = m + 1; else hi = m;
     }
     return 0;
+}
+
+static CAVE7 u32 lc(u32 c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
+/* 3 letters -> 'xy' (menu code), 0 = unknown */
+static CAVE7 u32 key3(const u8 *v, u32 base) {
+    u32 a = lc(v[0]), b = lc(v[1]), c = lc(v[2]);
+    if (a < 'a' || a > 'z' || b < 'a' || b > 'z' || c < 'a' || c > 'z') return 0;
+    return iso2((a - 0x60) << 10 | (b - 0x60) << 5 | (c - 0x60), base);
+}
+/* LanguageIETF (BCP 47) -> 'xy'; Chinese with a script or region: 'zs' Simplified (Hans, CN, SG), 'zt' Traditional
+ * (Hant, TW, HK, MO). Untagged Chinese stays 'zh'. */
+static CAVE7 u32 ietf(const u8 *v, u32 sz, u32 base) {
+    u32 i = 0, k = 0;
+    while (i < sz && v[i] && v[i] != '-' && v[i] != '_') i++;
+    if (i == 2) k = lc(v[0]) << 8 | lc(v[1]);
+    else if (i == 3) k = key3(v, base);
+    if (k != ('z' << 8 | 'h')) return k;
+    while (i < sz && v[i]) {
+        u32 j = ++i, t = 0;
+        while (i < sz && v[i] && v[i] != '-' && v[i] != '_') { if (i - j < 4) t = t << 8 | lc(v[i]); i++; }
+        if (i - j > 4) continue;
+        if (t == FCC('h','a','n','s') || t == ('c' << 8 | 'n') || t == ('s' << 8 | 'g')) return 'z' << 8 | 's';
+        if (t == FCC('h','a','n','t') || t == ('t' << 8 | 'w') || t == ('h' << 8 | 'k') || t == ('m' << 8 | 'o')) return 'z' << 8 | 't';
+    }
+    return k;
 }
 
 /* ---- pre-scan of the moov: per track its type, language and (subtitles) sample entry ---- */
@@ -142,6 +174,9 @@ static CAVE3 void scan_trak(struct scan *c, u64 pos, u64 end, struct trk *k) {
         if (b[8] == 1) { tscale = be32(b + 0x1c); dur = (u64)be32(b + 0x20) << 32 | be32(b + 0x24); }
         else { tscale = be32(b + 0x14); dur = be32(b + 0x18); }
     }
+    if (k->a2 == ('z' << 8 | 'h') && child(c, ma, me, FCC('e','l','n','g'), &a, &e) && e - a > 12 && e - a <= 0x1c
+        && !rd(c, a, b, e - a))   /* Apple extended language (BCP 47): Simplified / Traditional Chinese */
+        k->a2 = ietf(b + 12, e - a - 12, c->base);
     if (h == FCC('s','o','u','n')) { k->kind = 1; return; }
     if (h != FCC('s','b','t','l') && h != FCC('s','u','b','p') && h != FCC('s','u','b','t')) return;
     /* subtitle: only entries the player can show take a slot (stsd: header 8, version/flags 4, count 4, entry size 4, type) */
@@ -181,7 +216,7 @@ static __attribute__((noinline)) void scan_chpl(struct scan *c, u64 pos, u64 end
     *(volatile u32 *)(p + P_CHVER + 8) = i;
 }
 
-static CAVE3 u32 pref_a2(volatile struct st *s, u32 i, u32 base) {   /* list entry -> 'xy' */
+static CAVE7 u32 pref_a2(volatile struct st *s, u32 i, u32 base) {   /* list entry -> 'xy' */
     u8 a = s->pref[i][0], b = s->pref[i][1], c = s->pref[i][2];
     if (!a || !b) return 0;
     if (!c) return a == 'h' && b == 'e' ? ('i' << 8 | 'w') : (u32)a << 8 | b;   /* the menus know Hebrew as 'iw' */
@@ -607,4 +642,512 @@ CAVE3 void tx_end(u8 *d, u32 base) {
     volatile u32 *e = (volatile u32 *)(d + SPS_ENDPTS);
     if (e[0] != pv || e[1]) s->prov = 0;                   /* another AU by now */
     else if ((nx = nx_au(d, *(u32 *)(d + SPS_STARTPTS), pv))) { e[0] = nx; s->prov = 0; }
+}
+
+/* ---- text subtitles (MKV S_TEXT/UTF8 and S_TEXT/ASS, MP4 tx3g): the subtitle decoder's text line, cleaned ----
+ * Stock (mrSpsFillShowDataInfo) knows <b> <u> <i> and their end tags (exact lower case), line breaks (\N \n LF; and
+ * '|', switched off in mkinstall.py) and deletes {...}. Anything else is drawn as text, so <font color="..."> showed
+ * on screen. In place, never longer than the input:
+ *  - <i> <b> <u> (any case) are kept in lower case; <br> becomes a line break; any other <tag ...> or </tag> goes.
+ *    A '<' not followed by a letter (or '/' and a letter) and closed by '>' on the same line stays text ("<3", "< >").
+ *  - {\...} override blocks: \i1 \b1 \u1 (\..0) become <i> <b> <u> (</..>); \an7..9 or SSA \a5..7 ask for the top of
+ *    the screen; the rest goes. A '{' not followed by '\' stays text (the stock {...} deletion is switched off). */
+static CAVE6 u32 txt_fix(u8 *t, u32 n, volatile u8 *top) {
+    u32 i = 0, o = 0;
+    while (i < n) {
+        u8 c = t[i];
+        if (c == '<') {
+            u32 j = i + 1, cl = 0;
+            if (j < n && t[j] == '/') { cl = 1; j++; }
+            u8 a = j < n ? t[j] | 0x20 : 0;
+            if (a >= 'a' && a <= 'z') {
+                u32 k = j;
+                while (k < n && t[k] != '>' && t[k] != '<' && t[k] != '\n' && t[k] != '\r') k++;
+                if (k < n && t[k] == '>') {
+                    if (k == j + 1 && (a == 'i' || a == 'b' || a == 'u')) {
+                        t[o++] = '<'; if (cl) t[o++] = '/'; t[o++] = a; t[o++] = '>';
+                    } else if (!cl && a == 'b' && (t[j + 1] | 0x20) == 'r' && (k == j + 2 || t[j + 2] == '/' || t[j + 2] == ' '))
+                        t[o++] = '\n';
+                    i = k + 1; continue;
+                }
+            }
+        } else if (c == '{' && i + 1 < n && t[i + 1] == '\\') {
+            u32 k = i + 1;
+            while (k < n && t[k] != '}' && t[k] != '\n') k++;
+            if (k < n) {
+                u8 b[16]; u32 m = 0;
+                for (u32 p = i + 1; p + 1 < k; p++) {
+                    if (t[p] != '\\') continue;
+                    u8 x = t[p + 1], y = p + 2 < k ? t[p + 2] : 0, z = p + 3 < k ? t[p + 3] : 0;
+                    if (x == 'a' && y == 'n') { if (z >= '7' && z <= '9') *top = 1; }
+                    else if (x == 'a' && y >= '5' && y <= '7' && !(z >= '0' && z <= '9')) *top = 1;
+                    else if ((x == 'i' || x == 'b' || x == 'u') && (y == '0' || y == '1') && !(z >= '0' && z <= '9')
+                             && o + m + 4 <= k + 1 && m + 4 <= sizeof b) {
+                        b[m++] = '<'; if (y == '0') b[m++] = '/'; b[m++] = x; b[m++] = '>';
+                    }
+                }
+                for (u32 q = 0; q < m; q++) t[o++] = b[q];
+                i = k + 1; continue;
+            }
+        }
+        t[o++] = c; i++;
+    }
+    return o;
+}
+
+/* UTF-8 code point at t (n bytes left): returns its length, the code point in *cp (a stray byte counts as itself). */
+static CAVE6 u32 u8cp(const u8 *t, u32 n, u32 *cp) {
+    u8 c = t[0]; u32 k = c >= 0xf0 ? 3 : c >= 0xe0 ? 2 : c >= 0xc0 ? 1 : 0, v = k ? c & (0x3f >> k) : c;
+    if (k >= n) { *cp = c; return 1; }
+    for (u32 j = 1; j <= k; j++) { if ((t[j] & 0xc0) != 0x80) { *cp = c; return 1; } v = v << 6 | (t[j] & 0x3f); }
+    *cp = v; return k + 1;
+}
+static CAVE6 u32 cpw(u32 c) {   /* display width: 2 for East Asian wide / full-width, else 1 */
+    return (c >= 0x1100 && c <= 0x115f) || (c >= 0x2e80 && c <= 0xa4cf) || (c >= 0xac00 && c <= 0xd7a3) ||
+           (c >= 0xf900 && c <= 0xfaff) || (c >= 0xfe30 && c <= 0xfe4f) || (c >= 0xff00 && c <= 0xff60) ||
+           (c >= 0xffe0 && c <= 0xffe6) || c >= 0x20000 ? 2 : 1;
+}
+/* Width of t[i..) up to the line end (LF, CR, \N, \n); tags <..> count 0. *e = where the line ends. */
+static CAVE6 u32 lwidth(const u8 *t, u32 n, u32 i, u32 *e) {
+    u32 w = 0, cp;
+    while (i < n) {
+        u8 c = t[i];
+        if (c == '\n' || c == '\r' || (c == '\\' && i + 1 < n && (t[i + 1] | 0x20) == 'n')) break;
+        if (c == '<') { u32 k = i + 1; while (k < n && k < i + 6 && t[k] != '>') k++; if (k < n && t[k] == '>') { i = k + 1; continue; } }
+        i += u8cp(t + i, n - i, &cp); w += cpw(cp);
+    }
+    *e = i; return w;
+}
+static CAVE6 u32 cdiv(u32 a, u32 b) { u32 q = 0; while (q * b < a) q++; return q; }   /* ceil(a / b), small values */
+/* Word wrap (the stock wrap skips MKV SRT / MP4 tx3g, and counts bytes): each line wider than lim is cut into the
+ * fewest lines that fit, of even width, at spaces (a space becomes LF; in place). Text without spaces (CJK) stays. */
+static CAVE6 void txt_wrap(u8 *t, u32 n, u32 lim) {
+    for (u32 i = 0; i < n; ) {
+        u32 e, w = lwidth(t, n, i, &e);
+        if (w > lim) {
+            u32 k = cdiv(w, lim), tgt = cdiv(w, k), x = 0, sp = 0, xs = 0, have = 0, cp;
+            for (u32 j = i; j < e; ) {
+                if (t[j] == '<') { u32 q = j + 1; while (q < e && q < j + 6 && t[q] != '>') q++; if (q < e && t[q] == '>') { j = q + 1; continue; } }
+                if (t[j] == ' ') {
+                    if (x < tgt) { sp = j; xs = x; have = 1; }
+                    else if (have && (tgt - xs < x - tgt || x > lim)) { t[sp] = '\n'; x = x - xs - 1; sp = j; xs = x; }
+                    else { t[j] = '\n'; x = 0; have = 0; j++; continue; }
+                }
+                j += u8cp(t + j, e - j, &cp); x += cpw(cp);
+            }
+        }
+        i = e + 1;
+    }
+}
+
+#define WRAP_DEF 48     /* narrow characters per line when the box below is not known */
+#define SPS_BOXW 0x9d3c  /* subtitle decoder: text box width (1520 on the 1920x1080 plane) */
+#define SPS_FONT 0x9d44  /* subtitle decoder: font size (66 at the default Subtitle Size); about 2 x width / size
+                            average narrow characters fit (49 at 1520 / 66) */
+/* After mrSpsDecStringByFmtSRT (+ mp4_srt) or mrSpsDecStringByFmtASS: the text line at SPS_TXT / SPS_LEN. */
+CAVE6 void txt_dec(u8 *d, u32 base) {
+    volatile struct st *s = ST(base);
+    u8 *t = *(u8 **)(d + SPS_TXT); u32 n = *(u32 *)(d + SPS_LEN);
+    s->top = 0; s->tdec = (u32)d;
+    if (!t || !n || n > 0x4000 || t == (u8 *)&s->space) return;
+    u32 m = txt_fix(t, n, &s->top);
+    u32 lim = s->wlim, bw = *(u32 *)(d + SPS_BOXW), fs = *(u32 *)(d + SPS_FONT);
+    if (!lim) lim = bw >= 200 && bw <= 1920 && fs >= 16 && fs <= 200 ? cdiv(2 * bw, fs) + 2 : WRAP_DEF;
+    txt_wrap(t, m, lim);
+    if (m == n) return;
+    s->thits[0]++;
+    if (!m) { s->space = ' '; *(u8 **)(d + SPS_TXT) = (u8 *)&s->space; m = 1; }
+    else t[m] = 0;                                 /* the stock parser searches the line with strstr / strchr */
+    *(u32 *)(d + SPS_LEN) = m;
+}
+
+/* mrSpsUpdateDecBufByTextString: bl mrSpsRenderTextOnSurf. The text box from the player program's style (x SPS_BOXX,
+ * bottom SPS_BOXY, height SPS_BOXH = 280 on the 1920x1080 subtitle plane) holds 3 lines of the larger font sizes; the
+ * drawer skips lines outside it, so the top line of a 4-line subtitle (long lines wrapped) was lost. The box is made
+ * TALL_BOX high, growing upwards (lines stay bottom-aligned). A line that asked for the top is drawn in a box at the
+ * top of the plane, its lines from the top of the box (vertical alignment SPS_VALIGN 1 = top). */
+#define VA_RENDER  0x5847b0u   /* mrSpsRenderTextOnSurf */
+#define SPS_BOXY   0x9d38
+#define SPS_BOXH   0x9d40
+#define SPS_VALIGN 0x9d54
+#define TOP_MARGIN 60
+#define TALL_BOX   600
+typedef u32 (*rend_t)(u8 *d, u32 surf, void *info);
+CAVE6 u32 txt_rend(u8 *d, u32 surf, void *info, u32 base) {
+    volatile struct st *s = ST(base);
+    rend_t f = (rend_t)(base + VA_RENDER);
+    u32 y = *(u32 *)(d + SPS_BOXY), h = *(u32 *)(d + SPS_BOXH), va = *(u32 *)(d + SPS_VALIGN);
+    if (y > 1080 || h > 1080) return f(d, surf, info);      /* not the layout we know */
+    u32 nh = h < TALL_BOX ? TALL_BOX : h;
+    if (nh > y) nh = y;
+    *(u32 *)(d + SPS_BOXH) = nh;
+    if (s->top) { s->thits[1]++; *(u32 *)(d + SPS_BOXY) = nh + TOP_MARGIN; *(u32 *)(d + SPS_VALIGN) = 1; }
+    u32 r = f(d, surf, info);
+    *(u32 *)(d + SPS_BOXY) = y; *(u32 *)(d + SPS_BOXH) = h; *(u32 *)(d + SPS_VALIGN) = va;
+    return r;
+}
+
+/* ---- external text subtitle files (.srt .ass .ssa .smi .sub .txt ...): UTF-8 without a BOM ----
+ * CLpSpParser::vAnalyzeFileFormat takes a file as UTF-8 (type 3, code page 0) or UTF-16 (1, 2) only from its BOM; any
+ * other file (type 0) is read in the menu's Text Subtitle Charset (Latin 1 / Latin 2 / Cyrillic / Other), so a UTF-8
+ * file without a BOM - most of them - came out garbled with any setting but Other. After it: a type 0 file whose start
+ * (the parser's read buffer) is valid UTF-8 with at least one non-ASCII character is UTF-8. A legacy code page file is
+ * practically never valid UTF-8, so the menu setting still applies to those. Reached through liblp's GOT slot of
+ * vAnalyzeFileFormat (every external text format's mrInit calls it). */
+#define VA_ANAL     0x3a6318u  /* CLpSpParser::vAnalyzeFileFormat() */
+#define VA_BUFSZ    0x3a4018u  /* CLpSpParser::u4GetSpParserBufSize() */
+#define GOT_SPBUF   0x6ecbfcu  /* GOT word: address of the global holding the parser's read buffer */
+#define SP_ENC      0x14       /* parser: 0 code page, 1 UTF-16 BE, 2 UTF-16 LE, 3 UTF-8 */
+CAVE6 void ext_utf8(u8 *p, u32 base) {
+    volatile struct st *s = ST(base);
+    if (*(u32 *)(p + SP_ENC) != 0) return;
+    u8 **bv = *(u8 ***)(base + GOT_SPBUF);
+    u8 *b = bv ? *bv : 0;
+    u32 n = ((u32 (*)(u8 *))(base + VA_BUFSZ))(p), hi = 0;
+    if (!b || n < 4 || n > 0x200000) return;
+    for (u32 i = 0; i < n; ) {
+        u8 c = b[i];
+        if (!c) break;
+        if (c < 0x80) { i++; continue; }
+        u32 k, cp;
+        if (c >= 0xc2 && c <= 0xdf) { k = 1; cp = c & 0x1f; }
+        else if (c >= 0xe0 && c <= 0xef) { k = 2; cp = c & 0x0f; }
+        else if (c >= 0xf0 && c <= 0xf4) { k = 3; cp = c & 0x07; }
+        else return;                                        /* not UTF-8 */
+        if (i + k >= n) break;                              /* cut off by the end of the buffer */
+        for (u32 j = 1; j <= k; j++) {
+            if ((b[i + j] & 0xc0) != 0x80) return;
+            cp = cp << 6 | (b[i + j] & 0x3f);
+        }
+        if ((k == 2 && (cp < 0x800 || (cp >= 0xd800 && cp <= 0xdfff))) || (k == 3 && (cp < 0x10000 || cp > 0x10ffff)))
+            return;                                         /* overlong or surrogate */
+        hi++; i += k + 1;
+    }
+    if (!hi) return;
+    *(u32 *)(p + SP_ENC) = 3;
+    s->thits[1] += 0x10000;
+}
+
+/* MP4 tx3g text styles: a sample is a 2-byte length, the UTF-8 text, then boxes; a 'styl' box lists ranges (start and
+ * end character, font id, face flags 1 bold / 2 italic / 4 underline, size, colour, 12 bytes each). They become
+ * <b> <i> <u> tags for the text decoder (stock ignored them: no italics in MP4 subtitles). The text is rewritten in
+ * place into the sample, whose 'styl' box (12 bytes per range, at most 21 bytes of tags) leaves room. */
+static CAVE7 void tx3g_styl(u8 *t, u32 l, u32 cap, u8 *d) {
+    struct { u16 s, e; u8 f; } sty[8]; u32 ns = 0, p = l;
+    while (p + 8 <= cap) {
+        u32 sz = be32(t + p), ty = be32(t + p + 4);
+        if (sz < 8 || sz > cap - p) break;
+        if (ty == FCC('s','t','y','l') && sz >= 10) {
+            u32 cnt = t[p + 8] << 8 | t[p + 9];
+            for (u32 k = 0; k < cnt && ns < 8 && 10 + 12 * k + 12 <= sz; k++) {
+                u8 *e = t + p + 10 + 12 * k;
+                sty[ns].s = e[0] << 8 | e[1]; sty[ns].e = e[2] << 8 | e[3]; sty[ns].f = e[6] & 7;
+                if (sty[ns].f && sty[ns].e > sty[ns].s) ns++;
+            }
+        }
+        p += sz;
+    }
+    u8 src[600];
+    if (!ns || l > sizeof src) return;
+    for (u32 i = 0; i < l; i++) src[i] = t[i];
+    u32 o = 0, ci = 0, lim = cap - 1, cp;
+    for (u32 i = 0; ; ci++) {
+        for (u32 k = 0; k < ns; k++)                       /* ends first, then starts */
+            if (sty[k].e == ci) for (int b = 2; b >= 0; b--)
+                if (sty[k].f >> b & 1 && o + 4 <= lim) { t[o++] = '<'; t[o++] = '/'; t[o++] = b == 0 ? 'b' : b == 1 ? 'i' : 'u'; t[o++] = '>'; }
+        if (i >= l) break;
+        for (u32 k = 0; k < ns; k++)
+            if (sty[k].s == ci) for (int b = 0; b < 3; b++)
+                if (sty[k].f >> b & 1 && o + 3 <= lim) { t[o++] = '<'; t[o++] = b == 0 ? 'b' : b == 1 ? 'i' : 'u'; t[o++] = '>'; }
+        u32 m = u8cp(src + i, l - i, &cp);
+        if (o + m > lim) break;
+        for (u32 j = 0; j < m; j++) t[o++] = src[i + j];
+        i += m;
+    }
+    t[o] = 0;
+    *(u32 *)(d + SPS_LEN) = o;
+}
+
+/* mrSpsDecTextStringByFormat: after mrSpsDecStringByFmtSRT. MP4 tx3g samples (mp4_srt), their styles, then the text
+ * pass for every text line. */
+CAVE7 void txt_srt(u8 *d, u32 base) {
+    u8 *t0 = *(u8 **)(d + SPS_TXT); u32 n0 = *(u32 *)(d + SPS_LEN);
+    mp4_srt(d, base);
+    u8 *t = *(u8 **)(d + SPS_TXT); u32 l = *(u32 *)(d + SPS_LEN);
+    if (t0 && t == t0 + 2 && l + 2 < n0) tx3g_styl(t, l, n0 - 2, d);
+    txt_dec(d, base);
+}
+
+/* ---- MKV language list (B1/B2) and forced subtitles (B3) ----
+ * CLpMkvParser::mrParseTrackEntry keeps at most 10 audio and 32 subtitle tracks, the first ones in the file (an 11th
+ * audio record would overlap the subtitle records). mkv_scan reads the whole Tracks element ahead (from the H0 hook,
+ * before the parser walks it) and, with a language list and more tracks than fit, picks them like the MP4 pre-scan:
+ * the default audio track, then every track of the listed languages in list order, then the rest in file order but
+ * not forced subtitle tracks of other languages. mkv_keep (at the parser's "too many tracks" checks) then leaves the
+ * others out by track number. FlagForced and LanguageIETF are not read by the parser at all; the scan keeps both. */
+#define CAVE8 __attribute__((section(".langsel"), noinline))   /* in vMPCTestSendSetFileInf2Pipe (link.ld) */
+#define ML_VA       0x757d00u   /* RW bss slack (bss ends 0x757cd4; dvhook's state starts 0x757e00) */
+#define VA_MKVREAD  0x3b3a40u   /* CLpMkvParser::mrMkvReadDataFromBuffer(u8 *buf, u32 len): reads at +0x21f8, 0 = ok */
+#define K_POS       0x21f8      /* MKV parser: u64 file position of the next read */
+#define K_BUFLEFT   0x2944      /* MKV parser: bytes left in its read buffer at that position (0 = refill) */
+#define K_TRK       0x2e00      /* MKV parser: -> track info: +0x34 audio count, +0x36 subtitle count, audio records
+                                   0xa0 at +400 (language +0x88), subtitle records 0x70 at +2000 (language +0x38) */
+#define MKT         64          /* tracks the scan looks at */
+#define MKMAX       0x10000     /* largest Tracks element read ahead */
+struct ml {
+    u32 parser;      /* parser whose Tracks the scan read */
+    u32 skip[4];     /* track numbers (< 128) left out */
+    u32 hits[3];     /* scans, scans that chose, tracks left out */
+    u32 sublang;     /* last file start: Subtitle Language read << 16 | OSD language (0xffff = not read) */
+    u8 na, ns, sel, rd;    /* last scan: audio, subtitle tracks; 1 = chose; 2 = read, 3 = read failed */
+    u8 arm;          /* 1: the next subtitle switch-on is replaced; then 0x80 | the number chosen (0 = off / stock) */
+    u8 fopt;         /* option forced_subs (Setup > Extras, dvhook.sh forced on|off): forced subtitles only */
+    u8 nst, rsv;
+    u32 fn_sub, fn_osd, tab;   /* player program: a_cfg_get_subtitlelanguage, a_cfg_get_osdlanguage (Thumb), the
+                                  10-byte ISO 639 table; set by dvhook.sh on after checking them, 0 = not this program */
+    u8 snum[32];     /* track number of subtitle record i (mkv_keep) */
+    struct { u8 num, fl; u16 key; } st[36];   /* the scan's subtitle tracks: fl 1 forced, 2 default */
+    u32 atmos[4];    /* track numbers (< 128) of TrueHD tracks with Atmos (thd_scan) */
+    u32 proxy;       /* the MKV proxy of the file playing (mkv_start), 0 once it is stopped or destroyed (mkv_dtor) */
+};
+#define ML(base) ((volatile struct ml *)((base) + ML_VA))
+_Static_assert(sizeof(struct ml) <= 0x100 && __builtin_offsetof(struct ml, fopt) == 0x29 && __builtin_offsetof(struct ml, fn_sub) == 0x2c, "struct ml: fits before dvhook's state; mkinstall.py");
+struct mt { u8 num, type, def, forced; u16 key; u8 thd, rsv; };
+
+/* EBML element header at b[*i] (n bytes): ID with its marker, size; 0 = bad / unknown size / past the end */
+static CAVE8 u32 ebml(const u8 *b, u32 n, u32 *i, u32 *id, u32 *sz) {
+    for (int k = 0; k < 2; k++) {
+        if (*i >= n) return 0;
+        u32 c = b[*i], len = 1, m = 0x80;
+        while (len <= 8 && !(c & m)) { len++; m >>= 1; }
+        if (len > (k ? 8u : 4u) || *i + len > n) return 0;
+        u32 x = k ? c & (m - 1) : c, ones = (c & (m - 1)) == m - 1;
+        for (u32 j = 1; j < len; j++) {
+            u32 d = b[*i + j];
+            if (k && x >> 24) return 0;   /* sizes over 16 MB: not in a Tracks element we read */
+            x = x << 8 | d; if (d != 0xff) ones = 0;
+        }
+        if (k && ones) return 0;
+        *i += len;
+        if (k) *sz = x; else *id = x;
+    }
+    return *i + *sz <= n;
+}
+static CAVE7 u32 euint(const u8 *v, u32 sz) { u32 x = 0; for (u32 j = 0; j < sz; j++) x = x << 8 | v[j]; return sz > 4 ? 0xffffffff : x; }
+static CAVE7 void trk(const u8 *b, u32 e, u32 i, struct mt *t, u32 base) {
+    u32 id, sz, kl = 'e' << 8 | 'n', ki = 0;   /* Matroska defaults: Language "eng", FlagDefault 1, FlagForced 0 */
+    t->num = 0; t->type = 0; t->def = 1; t->forced = 0; t->thd = 0;
+    while (ebml(b, e, &i, &id, &sz)) {
+        const u8 *v = b + i;
+        if (id == 0xd7) { u32 x = euint(v, sz); t->num = x < 128 ? x : 0; }
+        else if (id == 0x83) t->type = euint(v, sz);
+        else if (id == 0x88) t->def = euint(v, sz) != 0;
+        else if (id == 0x86 && sz >= 8 && v[0] == 'A' && v[2] == 'T' && v[3] == 'R' && v[7] == 'D') t->thd = 1;   /* A_TRUEHD */
+        else if (id == 0x55aa) t->forced = euint(v, sz) != 0;
+        else if (id == 0x22b59 && sz >= 3) kl = key3(v, base);
+        else if (id == 0x22b59d) ki = ietf(v, sz, base);
+        i += sz;
+    }
+    t->key = ki ? ki : kl;
+}
+
+typedef u32 (*mkrd_t)(void *p, u8 *buf, u32 len);
+/* ---- Dolby Atmos in MKV TrueHD tracks ----
+ * The info bar names the audio by its PB code; TrueHD is 0x1a ("Dolby TrueHD") and the player has no Atmos name.
+ * thd_scan (from mkv_scan, only when the file has TrueHD) walks the Segment from the end of Tracks to the first
+ * Cluster, steps through up to TH_ELEMS of its blocks and looks at the first major sync of each TrueHD track: Atmos = 4 substreams
+ * and substream_info bit 7 (the 16-channel presentation). mkv_thd then gives such a track code 8 (SDDS, which never
+ * occurs on this player), whose info-bar text dvhook.sh points at "Dolby Atmos". */
+#define TH_ELEMS 200     /* cluster elements looked at */
+static CAVE5 u32 rdat(u8 *p, u64 pos, u8 *b, u32 n, u32 base) {
+    *(volatile u64 *)(p + K_POS) = pos; *(volatile u32 *)(p + K_BUFLEFT) = 0;
+    return ((mkrd_t)(base + VA_MKVREAD))(p, b, n);
+}
+/* element header at b (n bytes): ID, size (0xffffffffffffffff = unknown), header length; 0 = bad */
+static CAVE5 u32 hdr(const u8 *b, u32 n, u32 *id, u64 *sz) {
+    u32 i = 0;
+    for (int k = 0; k < 2; k++) {
+        if (i >= n) return 0;
+        u32 c = b[i], len = 1, m = 0x80;
+        while (len <= 8 && !(c & m)) { len++; m >>= 1; }
+        if (len > (k ? 8u : 4u) || i + len > n) return 0;
+        u64 x = k ? c & (m - 1) : c; u32 ones = (c & (m - 1)) == m - 1;
+        for (u32 j = 1; j < len; j++) { x = x << 8 | b[i + j]; if (b[i + j] != 0xff) ones = 0; }
+        i += len;
+        if (k) *sz = ones ? ~(u64)0 : x; else *id = (u32)x;
+    }
+    return i;
+}
+static CAVE5 void thd_blk(const u8 *d, u32 n, u32 *thd, volatile struct ml *m) {   /* a (Simple)Block's data */
+    if (n < 4 || (d[0] & 0xf0) != 0x80) return;   /* track number as a 1-byte vint (< 128) */
+    u32 num = d[0] & 0x7f, w = num >> 5, bit = 1u << (num & 31);
+    if (!(thd[w] & bit)) return;
+    for (u32 k = 4; k + 18 <= n && k < 4 + 64; k++)
+        if (d[k] == 0xf8 && d[k + 1] == 0x72 && d[k + 2] == 0x6f && d[k + 3] == 0xba && d[k + 8] == 0xb7 && d[k + 9] == 0x52) {
+            if (d[k + 16] >> 4 == 4 && d[k + 17] & 0x80) m->atmos[w] |= bit;
+            thd[w] &= ~bit;
+            return;
+        }
+}
+static CAVE5 void thd_scan(u8 *p, u64 pos, u32 *thd, u32 base) {
+    volatile struct ml *m = ML(base);
+    u8 h[16]; u32 id, hl; u64 sz;
+    for (u32 e = 0; ; e++) {   /* Segment children after Tracks, up to the first Cluster */
+        if (e >= 24 || rdat(p, pos, h, 16, base) || !(hl = hdr(h, 16, &id, &sz))) return;
+        if (id == 0x1f43b675) break;
+        if (sz == ~(u64)0) return;
+        pos += hl + sz;
+    }
+    /* Cluster children, by position: only element headers and the first bytes of a block are read (a video
+     * keyframe at the start can be megabytes); a BlockGroup is entered for its Block */
+    u8 d[96]; u64 end = sz == ~(u64)0 ? ~(u64)0 : pos + hl + sz;
+    pos += hl;
+    for (u32 e = 0; e < TH_ELEMS && pos < end && (thd[0] | thd[1] | thd[2] | thd[3]); e++) {
+        if (rdat(p, pos, h, 16, base) || !(hl = hdr(h, 16, &id, &sz)) || sz == ~(u64)0) return;
+        if (id == 0xa0) { pos += hl; continue; }   /* into the BlockGroup */
+        if ((id == 0xa3 || id == 0xa1) && !rdat(p, pos + hl, d, sz < sizeof d ? (u32)sz : sizeof d, base))
+            thd_blk(d, sz < sizeof d ? (u32)sz : sizeof d, thd, m);
+        pos += hl + sz;
+    }
+}
+/* CLpMkvMediaManagerProxy::mrStop, mrUnInit (vtable) and ~ (vtable, PLT): forget it. The proxy outlives a stop. */
+CAVE7 void mkv_dtor(u32 x, u32 base) { volatile struct ml *m = ML(base); if (m->proxy == x) m->proxy = 0; }
+/* CLpMpcWrapper::vMsgAElmStrmCallback, after mrMapPBACodeMode (the audio the decoder reports; the long-press info
+ * panel): decoder type 6 (MLP / TrueHD) gives "MLP". While an MKV plays on this wrapper, its TrueHD track gets the
+ * same name as in the menus (mkv_thd: Dolby TrueHD, or Dolby Atmos). Disc MLP (DVD-Audio) keeps its name. */
+CAVE7 u32 mkv_thd(u8 *p, u32 idx, u32 base);
+#define X_WRAPPER 0x80
+#define X_MKPARSER  0x114
+#define X_AUD       0x1c28
+CAVE7 void mkv_aelm(u32 w, u32 *code, u32 dt, u32 base) {
+    volatile struct ml *m = ML(base);
+    u8 *x = (u8 *)m->proxy;
+    if (dt != 6 || *code != 0xb || !x || *(u32 *)(x + X_WRAPPER) != w) return;
+    u8 *p = *(u8 **)(x + X_MKPARSER);
+    if ((u32)p == m->parser) *code = mkv_thd(p, x[X_AUD], base);
+}
+/* CLpMkvParser::eMapPBAudioCodec, A_TRUEHD (0x3bac6c, r5 = parser, r6 = audio record): 0x1a, or 8 for Atmos */
+CAVE7 u32 mkv_thd(u8 *p, u32 idx, u32 base) {
+    volatile struct ml *m = ML(base);
+    if ((u32)p != m->parser || idx >= 10 || !m->fn_sub) return 0x1a;   /* fn_sub 0: not our player program, code 8 is "SDDS" there */
+    u32 num = *(u32 *)(*(u8 **)(p + K_TRK) + 400 + idx * 0xa0 + 0x20);
+    return num < 128 && m->atmos[num >> 5] >> (num & 31) & 1 ? 8 : 0x1a;
+}
+
+CAVE8 void mkv_scan(u8 *p, u32 lo, u32 hi, u32 base) {
+    volatile struct ml *m = ML(base); volatile struct st *s = ST(base);
+    m->parser = 0; m->sel = 0; m->rd = 0; m->nst = 0; m->hits[0]++;
+    for (u32 j = 0; j < 4; j++) { m->skip[j] = 0; m->atmos[j] = 0; }
+    for (u32 j = 0; j < 32; j++) m->snum[j] = 0;
+    if (hi || !lo || lo > MKMAX) return;
+    u8 *b = ((alloc_t)(base + VA_ALLOC))(lo);
+    if (!b) return;
+    u64 pos = *(volatile u64 *)(p + K_POS);
+    u32 r = ((mkrd_t)(base + VA_MKVREAD))(p, b, lo);
+    *(volatile u64 *)(p + K_POS) = pos; *(volatile u32 *)(p + K_BUFLEFT) = 0;   /* the parser reads from there again */
+    struct mt t[MKT]; u32 n = 0, i = 0, id, sz, na = 0, ns = 0;
+    if (!r) while (n < MKT && ebml(b, lo, &i, &id, &sz)) {
+        if (id == 0xae) {
+            trk(b, i + sz, i, &t[n], base);
+            if (t[n].type == 2) na++; else if (t[n].type == 0x11) ns++;
+            if (t[n].type == 0x11 && t[n].num && m->nst < 36) {
+                u32 q = m->nst++; m->st[q].num = t[n].num; m->st[q].fl = t[n].forced | t[n].def << 1; m->st[q].key = t[n].key;
+            }
+            n++;
+        }
+        i += sz;
+    }
+    ((free_t)(base + VA_FREE))(b);
+    m->rd = r ? 3 : 2;
+    if (r) return;
+    u32 thd[4] = { 0, 0, 0, 0 };
+    for (u32 k = 0; k < n; k++) if (t[k].type == 2 && t[k].thd && t[k].num) thd[t[k].num >> 5] |= 1u << (t[k].num & 31);
+    if (thd[0] | thd[1] | thd[2] | thd[3]) {
+        thd_scan(p, pos + lo, thd, base);
+        *(volatile u64 *)(p + K_POS) = pos; *(volatile u32 *)(p + K_BUFLEFT) = 0;
+    }
+    m->na = na; m->ns = ns; m->parser = (u32)p;
+    if (!s->pref[0][0]) return;   /* no language list: the parser's own choice */
+    for (u32 kind = 2; kind <= 0x11; kind += 0xf) {
+        u32 lim = kind == 2 ? 10 : 32;
+        if ((kind == 2 ? na : ns) <= lim) continue;
+        u8 keep[MKT]; u32 used = 0, d = n;
+        for (u32 k = 0; k < n; k++) { keep[k] = 0; if (t[k].type == kind && d == n && (kind != 2 || t[k].def)) d = k; }
+        if (kind == 2) {
+            if (d == n) for (u32 k = 0; k < n; k++) if (t[k].type == 2) { d = k; break; }
+            if (d < n) { keep[d] = 1; used++; }
+        }
+        for (u32 j = 0; j < 8 && used < lim; j++) {
+            u32 a2 = pref_a2(s, j, base);
+            if (!a2) continue;
+            for (u32 k = 0; k < n && used < lim; k++)
+                if (t[k].type == kind && !keep[k] && t[k].key == a2) { keep[k] = 1; used++; }
+        }
+        for (u32 k = 0; k < n && used < lim; k++)
+            if (t[k].type == kind && !keep[k] && !(kind == 0x11 && t[k].forced)) { keep[k] = 1; used++; }
+        for (u32 k = 0; k < n; k++)
+            if (t[k].type == kind && !keep[k] && t[k].num) { m->skip[t[k].num >> 5] |= 1u << (t[k].num & 31); m->hits[2]++; }
+        m->sel = 1;
+    }
+    if (m->sel) m->hits[1]++;
+}
+
+/* mrParseTrackEntry, before an audio (slot 0xff) or subtitle (slot = its record index) record is stored: 0 = leave
+ * the track out (the parser then frees it like a track of unknown type). */
+CAVE8 u32 mkv_keep(u8 *p, u32 lo, u32 hi, u32 slot, u32 base) {
+    volatile struct ml *m = ML(base);
+    if ((u32)p != m->parser || hi || lo >= 128) return 1;
+    u32 w = lo >> 5, bit = 1u << (lo & 31);
+    if (m->skip[w] & bit) return 0;
+    if (slot < 32) m->snum[slot] = lo;
+    return 1;
+}
+
+/* CLpMkvMediaManagerProxy::mrOnStateSettingFileInfo, before mrMkvSetStreamInf: the start tracks are chosen
+ * (+0x1c28 audio index, +0x1c29 subtitle 1-based, 0 = off). f = that function's stack frame. */
+typedef int (*cfg16_t)(u16 *);
+#define SUBLANG_OFF  0x1e4      /* Subtitle Language values: indexes of the 10-byte ISO 639 table (English 0x7e), */
+#define SUBLANG_AUTO 0x1e5      /* Off and Auto past its end; OSD language 0x1e6 = Traditional Chinese */
+#define X_SUB       0x1c29
+CAVE8 void mkv_start(u8 *x, const u8 *f, u32 base) {
+    volatile struct ml *m = ML(base);
+    u16 v = 0xffff, o = 0xffff;
+    m->arm = 0; m->sublang = 0xffffffff; m->proxy = (u32)x;
+    if (!m->fn_sub || ((cfg16_t)m->fn_sub)(&v) || ((cfg16_t)m->fn_osd)(&o)) return;
+    m->sublang = (u32)v << 16 | o;
+    m->arm = v == SUBLANG_AUTO || (m->fopt && v < SUBLANG_OFF);   /* else the player's own choice stays */
+}
+/* a track record's language (3 letters, none = English) -> 'xy' */
+static CAVE7 u32 lkey(const u8 *l, u32 base) { return l[0] ? key3(l, base) : 'e' << 8 | 'n'; }
+static CAVE7 u32 zfam(u32 k) { return k == ('z' << 8 | 'h') || k == ('z' << 8 | 's') || k == ('z' << 8 | 't'); }
+/* CLpMkvMediaManagerProxy::mrChangeSpStNo(PB_SPSTN_PARAM_T &): +4 subtitle number (1-based), +5 on.
+ * Right after a start the player switches a subtitle on: with Subtitle Language = Auto it took the first track. That
+ * first switch-on is replaced: the target language is the Subtitle Language, or the player's menu language for Auto;
+ * with forced_subs on, the forced track (FlagForced) in that language, else no subtitles; with it off (Auto only),
+ * the track in that language with the Default flag, else the first one, else the player's choice. */
+CAVE8 void mkv_chg(u8 *x, u8 *prm, u32 base) {
+    volatile struct ml *m = ML(base);
+    if (m->arm != 1 || !prm[5]) return;
+    m->arm = 0x80;
+    u8 *p = *(u8 **)(x + X_MKPARSER);
+    if ((u32)p != m->parser) return;
+    u32 v = m->sublang >> 16, o = m->sublang & 0xffff, want;
+    if (v == SUBLANG_AUTO) v = o;
+    if (v == 0x1e6) want = 'z' << 8 | 't';
+    else if (v < SUBLANG_OFF) { want = key3((const u8 *)(m->tab + v * 10 + 4), base); if (want == ('z' << 8 | 'h')) want = 'z' << 8 | 's'; }
+    else return;
+    u8 *ti = *(u8 **)(p + K_TRK);
+    u32 ns = ti[0x36], best = 0, rank = 0;
+    for (u32 j = 0; j < ns && j < 32; j++) {
+        u32 k = 0, fl = 0;
+        for (u32 q = 0; q < m->nst; q++) if (m->st[q].num == m->snum[j]) { k = m->st[q].key; fl = m->st[q].fl; break; }
+        if (!k) k = lkey(ti + 2000 + j * 0x70 + 0x38, base);
+        u32 r = k == want ? 4 : zfam(k) && zfam(want) ? 2 : 0;   /* the exact language first, then any Chinese */
+        if (!r || (m->fopt && !(fl & 1))) continue;
+        if (!m->fopt && fl & 2) r++;
+        if (r > rank) { rank = r; best = j + 1; }
+    }
+    if (best) prm[4] = best;
+    else if (m->fopt) { prm[4] = 0; prm[5] = 0; }
+    m->arm = 0x80 | best;
 }

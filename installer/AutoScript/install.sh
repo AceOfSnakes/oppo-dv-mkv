@@ -9,10 +9,10 @@
 #   /mnt/ubi_boot/bdpprog               boot wrapper (run by the jailbreak launcher instead of bdpprog.1)
 #   /mnt/ubi_boot/bdpprog.prev          the jb_overlay boot script, if that mod was installed (the wrapper chains to it)
 #   /mnt/ubi_boot/oppo-dv-mkv/          dvmkv.sh + the installed parts: dvhook.sh, p7kel.sh, bgfix.sh, sarfix.sh, arflag.sh, dvexit.sh, dvcm.sh, hvccfix.sh,
-#                                       ftrfix.sh, mp4elfix.sh, alacdec.bin, bdpaudec.db, vidopt.sh, dlnaiso, dlnaiso.sh,
+#                                       ftrfix.sh, mp4elfix.sh, alacdec.bin, bdpaudec.db, vidopt.sh, isomusic.sh, dlnaiso, dlnaiso.sh,
 #                                       dmrhook.sh, dmrhook.bin, xtmenu.sh, xtload.bin, xtmenu.bin (Dolby Vision MKV fix),
 #                                       bootmsg.sh, bootmsg.bin (all), subs.sh,
-#                                       image_bdp83.bin (subtitles), fpage.sh (factory menu), languages.txt (MP4 language list, from
+#                                       image_bdp83.bin, font.bin (subtitles), fpage.sh (factory menu), languages.txt (MP4/MKV language list, from
 #                                       oppo-dv-mkv-languages.txt on the stick), options.txt (video options, from
 #                                       oppo-dv-mkv-options.txt on the stick). RAM patches applied at every boot.
 # Nothing in the firmware itself is modified. Log: oppo-dv-mkv.log in the root of the USB stick.
@@ -34,6 +34,7 @@ IN_DV=$DV; IN_SUBS=$SUBS; IN_MENU=$MENU   # what this zip contains (DV/SUBS/MENU
 SQUARES="09 11 18 19 20 21 22 23"
 RESORIG=${OPPODV_RESORIG:-/mnt/rootfs_normal/res/image_bdp83.bin}
 DBORIG=${OPPODV_DBORIG:-/mnt/rootfs_normal/res/bdpaudec.db}   # audio DSP decoders (stock v65: 0abee82b...)
+FONTORIG=${OPPODV_FONTORIG:-/mnt/rootfs_normal/res/font.bin}  # subtitle / menu font (stock v65: dbc31c6c...)
 exec >>$L 2>&1
 # once per boot: some players start AutoScript twice (e.g. with a second USB disk); two runs must not overlap
 mkdir ${OPPODV_LOCK:-/tmp/oppo-dv-mkv.lock} 2>/dev/null || { echo "=== installer already started during this boot, not again"; exit 0; }
@@ -126,6 +127,7 @@ if [ -e $S/CHECKONLY ]; then
   [ -f $S/oppo-dv-mkv/mp4elfix.sh ] && echo "MP4 P7:    $($ECHECK 2>&1 | tr '\n' ' ')"
   [ -f $S/oppo-dv-mkv/alacdec.bin ] && echo "audio db:  $(m5 $DBORIG)  (ALAC decoder swap needs 0abee82b1ea7bc77d3db30907355376b)"
   [ -f $S/oppo-dv-mkv/vidopt.sh ] && echo "video options: $($VCHECK 2>&1 | tr '\n' ' ')"
+  [ -f $S/oppo-dv-mkv/isomusic.sh ] && echo "ISO under Music: $(sh $S/oppo-dv-mkv/isomusic.sh check 2>&1 | tr '\n' ' ')"
   echo "bdpprog.1: $(m5 $PLAYER)  (region player program, informative)"
   echo "running:   $RUN  (player program in use)"
   echo "subtitles: $(echo $SCK)"
@@ -211,8 +213,8 @@ if [ -z "$DV$SUBS$MENU" ] && [ -n "$MENU_NN" ] && [ -z "$IN_DV$IN_SUBS" ]; then
   HEAD="NOTHING TO INSTALL - this player does not need it. Nothing was changed."; result; exit 0
 fi
 [ -n "$DV$SUBS$MENU" ] || fail "none of the parts in this zip can be installed safely on this player"
-FILES="dvmkv.sh${BMSG:+ bootmsg.sh bootmsg.bin}${DV:+ dvhook.sh p7kel.sh bgfix.sh sarfix.sh arflag.sh dvexit.sh dvcm.sh hvccfix.sh ftrfix.sh mp4elfix.sh alacdec.bin vidopt.sh}${ISO:+ dlnaiso dlnaiso.sh dmrhook.sh dmrhook.bin}${PAGE:+ xtmenu.sh xtload.bin xtmenu.bin}${SUBS:+ subs.sh}${MENU:+ fpage.sh}"
-for f in $FILES bdpprog ${SUBS:+$(for q in $SQUARES; do echo sq$q.png; done)}; do
+FILES="dvmkv.sh${BMSG:+ bootmsg.sh bootmsg.bin}${DV:+ dvhook.sh p7kel.sh bgfix.sh sarfix.sh arflag.sh dvexit.sh dvcm.sh hvccfix.sh ftrfix.sh mp4elfix.sh alacdec.bin vidopt.sh isomusic.sh}${ISO:+ dlnaiso dlnaiso.sh dmrhook.sh dmrhook.bin}${PAGE:+ xtmenu.sh xtload.bin xtmenu.bin}${SUBS:+ subs.sh}${MENU:+ fpage.sh}"
+for f in $FILES bdpprog ${SUBS:+$(for q in $SQUARES; do echo sq$q.png; done) font.bin.gz}; do
   [ -f $S/oppo-dv-mkv/$f ] || fail "missing $f on the stick (unzip the whole release)"
   grep -q " $f\$" $S/oppo-dv-mkv/MD5SUMS && [ "$(m5 $S/oppo-dv-mkv/$f)" = "$(grep " $f\$" $S/oppo-dv-mkv/MD5SUMS | cut -d' ' -f1)" ] \
     || fail "$f on the stick is corrupt (md5 mismatch) - re-copy the release"
@@ -224,7 +226,7 @@ put(){  # atomic copy: $1 source, $2 destination
   echo "  $2 installed"
 }
 for f in $FILES; do put $S/oppo-dv-mkv/$f $D/$f || fail "writing $D/$f"; done
-[ -z "$DV" ] && [ -e $D/p7kel.sh ] && rm -f $D/dvhook.sh $D/p7kel.sh $D/bgfix.sh $D/sarfix.sh $D/arflag.sh $D/dvexit.sh $D/dvcm.sh $D/hvccfix.sh $D/ftrfix.sh $D/mp4elfix.sh $D/alacdec.bin $D/bdpaudec.db $D/vidopt.sh && echo "  Dolby Vision MKV fix not installed now: older copy removed"
+[ -z "$DV" ] && [ -e $D/p7kel.sh ] && rm -f $D/dvhook.sh $D/p7kel.sh $D/bgfix.sh $D/sarfix.sh $D/arflag.sh $D/dvexit.sh $D/dvcm.sh $D/hvccfix.sh $D/ftrfix.sh $D/mp4elfix.sh $D/alacdec.bin $D/bdpaudec.db $D/vidopt.sh $D/isomusic.sh && echo "  Dolby Vision MKV fix not installed now: older copy removed"
 [ -z "$ISO" ] && [ -e $D/dmrhook.sh ] && rm -f $D/dlnaiso $D/dlnaiso.sh $D/dmrhook.sh $D/dmrhook.bin && echo "  DLNA disc images not installed now: older copy removed"
 [ -z "$BMSG" ] && [ -e $D/bootmsg.sh ] && rm -f $D/bootmsg.sh $D/bootmsg.bin && echo "  boot message not installed now: older copy removed"
 [ -z "$PAGE" ] && [ -e $D/xtmenu.sh ] && rm -f $D/xtmenu.sh $D/xtload.bin $D/xtmenu.bin && echo "  Setup > Extras page not installed now: older copy removed"
@@ -243,7 +245,7 @@ fi
 if [ -n "$DV" ]; then   # MP4 audio/subtitle language list: oppo-dv-mkv-languages.txt next to the AutoScript folder
   LS=${S%/*}/oppo-dv-mkv-languages.txt
   if [ -f $LS ]; then put $LS $D/languages.txt || fail "writing $D/languages.txt"
-    l=$(echo $(tr -d '\r' < $LS | grep -v '^[[:space:]]*#' | awk 'NF{print $1}')); echo "  MP4 language list: ${l:-none (the player keeps the first 8 tracks)}"
+    l=$(echo $(tr -d '\r' < $LS | grep -v '^[[:space:]]*#' | awk 'NF{print $1}')); echo "  language list (MP4, MKV): ${l:-none (the player keeps the first tracks)}"
   elif [ -f $D/languages.txt ]; then echo "  $D/languages.txt kept (no oppo-dv-mkv-languages.txt on the stick)"; fi
 fi
 # options: video options (vidopt.sh), DV MKV / L5, DLNA disc images, the boot message and the Setup page (dvmkv.sh),
@@ -251,7 +253,7 @@ fi
 OS=${S%/*}/oppo-dv-mkv-options.txt
 if [ -f $OS ]; then put $OS $D/options.txt || fail "writing $D/options.txt"
   v(){ x=$(tr -d '\r' < $OS | grep -v '^[[:space:]]*#' | sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\([A-Za-z0-9_-]*\).*/\1/p" | sed -n '$p' | tr A-Z a-z); echo ${x:-${2:-stock}}; }
-  echo "  options: dv_mkv $(v dv_mkv on), dv_l5 $(v dv_l5 on), native_25p $(v native_25p), menu_refresh $(v menu_refresh), default_language $(v default_language), dlna_iso $(v dlna_iso on), boot_message $(v boot_message on), setup_extras $(v setup_extras on)"
+  echo "  options: dv_mkv $(v dv_mkv on), dv_l5 $(v dv_l5 on), forced_subs $(v forced_subs off), native_25p $(v native_25p), menu_refresh $(v menu_refresh), default_language $(v default_language), dlna_iso $(v dlna_iso on), boot_message $(v boot_message on), setup_extras $(v setup_extras on)"
 elif [ -f $D/options.txt ]; then echo "  $D/options.txt kept (no oppo-dv-mkv-options.txt on the stick)"; fi
 [ -z "$MENU" ] && [ -e $D/fpage.sh ] && rm -f $D/fpage.sh && echo "  factory menu shortcut not installed now: older copy removed"
 if [ -n "$SUBS" ]; then
@@ -272,8 +274,18 @@ EOT
     sync; [ "$(m5 $I)" = 44bedb87bacfc5217ec22cffd2b18295 ] && mv $I $D/image_bdp83.bin && sync \
       && echo "  $D/image_bdp83.bin built" || { rm -f $I; echo "  subtitle menu image could not be built (skipped)"; }
   fi
-elif [ -e $D/subs.sh ] || [ -e $D/image_bdp83.bin ]; then
-  rm -f $D/subs.sh $D/image_bdp83.bin; echo "  subtitle improvements not installed now: older copy removed"
+  # subtitle font: the player's font with the letters subtitles need added (Hungarian double acute, Romanian comma
+  # below, Traditional Chinese); used from the next boot when the menu language uses the main font
+  if [ "$(m5 $FONTORIG)" != dbc31c6c4979ef4e86d7723c18bf4eed ]; then rm -f $D/font.bin; echo "  subtitle font: unexpected original file (skipped)"
+  elif [ "$(m5 $D/font.bin)" = 7ffd6c8c88be9d4787ba0cf36e91b424 ]; then echo "  $D/font.bin up to date"
+  else
+    I=$D/font.bin.tmp
+    gunzip -c $S/oppo-dv-mkv/font.bin.gz > $I; sync
+    [ "$(m5 $I)" = 7ffd6c8c88be9d4787ba0cf36e91b424 ] && mv $I $D/font.bin && sync \
+      && echo "  $D/font.bin installed" || { rm -f $I; echo "  subtitle font could not be installed (skipped)"; }
+  fi
+elif [ -e $D/subs.sh ] || [ -e $D/image_bdp83.bin ] || [ -e $D/font.bin ]; then
+  rm -f $D/subs.sh $D/image_bdp83.bin $D/font.bin; echo "  subtitle improvements not installed now: older copy removed"
 fi
 rm -f $D/disable $D/bootcount
 if [ -n "$CHAIN" ] && ! ours; then   # keep the jb_overlay boot script; our wrapper runs it instead of the player

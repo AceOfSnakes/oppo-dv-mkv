@@ -16,6 +16,7 @@ The hardware is a MediaTek MT8581 (4× Cortex-A9) running Linux 3.10.
 | MKV Dolby Vision signalling | `liblp.so` inside the running `bdpprog.1` (via `/proc/<pid>/mem`) | `dvhook.sh` | `src/liblp/` |
 | MP4: Dolby Vision profile 8, languages, text subtitles, chapters, language list, subtitles in "bad interleave" mode (v1.8.0) | `liblp.so` (same as above) | `dvhook.sh` | `src/liblp/`, `src/liblp/mp4/` |
 | Subtitle formats: VobSub colours and position (v1.8.1), PGS together with other formats, PGS clock (v1.9.0) | `liblp.so` (same as above) | `dvhook.sh` | `src/liblp/mp4/` (`mp4.c`, `shims.S`), sites in `src/liblp/mkinstall.py` |
+| Text subtitles (v2.2.0, Part 1e); MKV language list, Chinese language codes, forced subtitles with Auto (v2.2.0, Part 1f) | `liblp.so` (same as above) | `dvhook.sh` | `src/liblp/mp4/` |
 | Profile 7 decoder fixes | `bdpdrv1` kernel module (via `/dev/mem`) | `p7kel.sh` | `src/kernel/` |
 | Black letterbox bars in Dolby Vision (v1.6.0) | `bdpdrv1` kernel module (via `/dev/mem`), one instruction | `src/kernel/bgfix.sh` | none |
 | Non-square pixels stretched to 16:9 (v1.7.0) | `bdpdrv1` kernel module (via `/dev/mem`), two branches + a 30-word stub | `src/kernel/sarfix.sh` | `src/kernel/sar.S` |
@@ -27,6 +28,7 @@ The hardware is a MediaTek MT8581 (4× Cortex-A9) running Linux 3.10.
 | ALAC decoder of firmware 56/60 (v1.7.0) | `/res/bdpaudec.db` (symlink swapped by the boot wrapper) | `install.sh` builds it | `src/audio/alacdec.bin` |
 | Better subtitles | running `bdpprog.1` + `liblp.so` (RU 65-0131 program) | `subs.sh` | `src/subtitles/` |
 | Factory menu shortcut | running `bdpprog.1` (RU 65-0131 or jb_overlay V3 program) | `fpage.sh` | `src/factory-menu/` |
+| ISO files under Music (v2.2.0, Part 1g) | running `bdpprog.1` (RU 65-0131 program family with the ISO player) | `isomusic.sh` | `src/isomusic/` |
 | Setup > Extras page (v2.1.2) | running `bdpprog.1` (RU 65-0131 program family), 64 KiB mapped at `0x01b80000` + 4 code halfwords | `xtmenu.sh` | `src/setupmenu/` |
 
 The patchers are idempotent (`on` when already on does nothing) and reversible (`off`). They verify every patch
@@ -78,6 +80,8 @@ written.
 | MP4 pre-scan blob | `0x530de8` | 0x9e4 | over `vMPCTestDvdRwdSpeedThr` (self-test thread entry) |
 | Scan-type blob (Part 1d) | `0x530490` | 1318 of 0x958 | over `vMPCTestDvdRwdThr` (self-test thread entry, only referenced by `i4MPCTestPlayDvdRwd`) |
 | MP4 state | `0x757e80` | 0xe8 | bss slack: parser pointer, languages by track_ID, tx3g mask, language list, skip bitmap, counters |
+| MKV language list blob (Part 1f) | `0x53e410` | 0x898 | over `vMPCTestSendSetFileInf2Pipe` (self-test code) |
+| MKV language list state | `0x757d00` | 0x40 | bss slack (Part 1f) |
 
 Blob code addresses its own tables as `base + link address` (a plain table read would hit the player program).
 
@@ -273,6 +277,98 @@ It runs only with the switch on. `mp4_gsi` (after `mrGetStreamInfo`) writes `+0x
 `vidopt.sh get native_25p` answers `on`. With the switch off the hooks still read the headers but nothing is passed
 on. SD is left out on purpose: a 576p25 file flagged progressive would be sent in Source Direct at a rate HDMI has
 no 576-line mode for.
+
+## Part 1e: liblp.so, text subtitles (v2.2.0)
+
+Two text paths exist. **Embedded** text (MKV `S_TEXT/UTF8` and `S_TEXT/ASS`, MP4 `tx3g`) goes through the subtitle
+decoder: `mrSpsDecTextStringByFormat` → `mrSpsDecStringByFmtSRT` / `...ASS` (the ASS one skips the 8 commas) →
+`mrSpsUpdateDecBufByTextString` → `mrSpsFillShowDataInfo` (tags and lines) → `mrSpsRenderTextOnSurf` →
+`c_utext_render_textbox` (exported by the player program). **External** files are parsed in liblp (`CLpSp*Parser`)
+but drawn by the player program's DivX subtitle code with plain string drawing (no per-segment style): only the
+encoding can be fixed in liblp.
+
+Code: `src/liblp/mp4/mp4.c` (section `.subtext` in `vMPCMpgFilePbTest` 0x542360, 0x9fc bytes; `.subtx3g` in
+`vMPCTestPauseWithAThr` 0x53276c, 0x810 bytes; both MPC self-test code reachable only from other self-tests), shims
+in `src/liblp/mp4/shims.S`, sites in `src/liblp/mkinstall.py`.
+
+| Site (runtime VA) | Was | Now |
+|---|---|---|
+| 0x58a0f0 `bl mrSpsDecStringByFmtSRT` | | `m_srt` → `txt_srt`: `mp4_srt` (tx3g sample), `tx3g_styl` (style boxes → `<b> <i> <u>`, rewritten in place into the sample, whose `styl` box leaves room), `txt_dec` |
+| 0x58a0fc `bl mrSpsDecStringByFmtASS` | | `m_ass` → `txt_dec` |
+| `txt_dec` | | `txt_fix` (keep `<b> <i> <u>` in lower case, `<br>` → LF, drop other `<tags>`; `{\...}`: `\i \b \u` 0/1 → tags, `\an7-9` / SSA `\a5-7` → top, rest dropped; never longer than the input), then `txt_wrap` (balanced lines at spaces; width 2 for East Asian wide characters; limit = 2 × box width / font size + 2 = 49 at 1520 / 66, or `dvhook.sh wrap N`) |
+| 0x57fdfc `bl mrSpsRenderTextOnSurf` | | `m_rend` → `txt_rend`: box height (decoder +0x9d40, 280) at least 600, growing upwards (bottom +0x9d38 kept); a top line: bottom = height + 60, vertical alignment (+0x9d54) 1 = top (3 = bottom) |
+| 0x584e18 `bls` | `{...}` deleted | `b`: not deleted (`txt_fix` handles `{\...}`; literal braces stay) |
+| 0x583b48, 0x583ba4 `mov r1, #0x7c` (pipe) | a pipe is a line break | `#0xff` (never in UTF-8) |
+| 0x584f0c `cmp ip, #200` | lines over 200 bytes rejected | `#1000` |
+| 0x585fcc `bls`; 0x5858a4, 0x585c14 `cmp, #54` | wraps after 54 bytes (single-line non-UTF-8 lines; styled segments) | off (`b`; `#1000`) |
+| 0x5839e0, 0x583a80, 0x583b04, 0x583b80 (tag finder), 0x584f44 / 0x584f50, 0x585ad0 / 0x585ae0, 0x585f78 / 0x585f84 (fill) | 3 lines | 4 lines; line array (0x14 per line) 0x3c → 0x50 at 0x584f7c / 0x584ff0 |
+| GOT 0x6eb8dc `CLpSpParser::vAnalyzeFileFormat` | BOM only: EF BB BF → 3 (UTF-8), FF FE → 2, FE FF → 1, else 0 = menu code page | `x_anal` → original, then `ext_utf8`: type 0 + valid UTF-8 with a non-ASCII character in the parser's read buffer (`**GOT 0x6ecbfc`, size `u4GetSpParserBufSize`) → 3 |
+
+Decoder fields used (default style): x +0x9d34 (200), bottom +0x9d38 (990), width +0x9d3c (1520), height +0x9d40
+(280), font size +0x9d44 (66), line height +0x9d48 (72), horizontal alignment +0x9d50 (2 = centre). Style bits of a
+segment: 2 italic, 4 bold, 8 underline. State: `struct st` +0x134 (top, wrap width, counters, last decoder).
+
+**Font.** The player loads one font for menus and subtitles by OSD language (player program `FUN_007a60f8`): Chinese →
+`font_sub.bin`, Japanese → `font_jp.bin`, Russian → `font_rus.bin`, others → `font.bin` (a 12-byte header: u32 LE 1,
+u32 LE 8, u32 BE length, then TrueType). `src/subtitles/mkfont.py` builds the shipped `font.bin` from the player's own
+`font.bin` and `font_sub.bin`: ő ű Ő Ű from ó ú Ó Ú with the acute contour doubled, ș ț Ș Ț mapped to the cedilla
+glyphs, and the 2,027 Big5 level-1 characters missing from `font.bin` copied from `font_sub.bin` (scaled from 256 to
+1024 units per em and matched on a shared character). The boot wrapper swaps it into `/res` when its md5 matches.
+
+## Part 1g: player program, ISO files under Music (v2.2.0)
+
+`libplb` classes files by extension (table 0x11dd124, 0x53 entries of 20 bytes; class 2 audio, 4 photo, 8 video; type
+0x53 = ISO at 0x11dd728). The jailbreak sets the ISO class to 8. A folder node (+0x78 file list, record +0 class, +0x24
+name, +0x20 next; counts +8 audio, +10 video) keeps the class each file had when the folder was scanned, and sorts by exact class, so
+0xA does not work: the file would be dropped. `isomusic.sh` sets the ISO class word, and the records and counts of the opened
+folder, to 2 for a Music list and to 8 otherwise, at two places: `_plb_set_current_dir_folder` 0x161f34 `bl _plb_lock`
+(the player's browser; class in r6, node at `[sp,#16]`) and `_plb_get_media_file_info` 0x160cee (phone apps; class mask
+r7, filter flag sl). The browser's sorted list is built per class, so an ISO is in both. The code is in four wrapper
+functions turned into tail jumps (0x156224, 0x15624c, 0x156288, 0x1562ba). Opening an ISO goes by type (jailbreak
+0x1c02d78), not by class.
+
+## Part 1f: liblp.so, MKV language list and forced subtitles (v2.2.0)
+
+`CLpMkvParser::mrParseTrackEntry` stores a track only at the end of its TrackEntry: audio records 0xa0 each at
+`[parser+0x2e00] + 400` (count byte +0x34, at most 10: `cmp r1, #9`), subtitle records 0x70 each at `+2000` (count
++0x36, at most 32: `cmp r2, #31`); more are dropped (that path returns without freeing the name and CodecPrivate).
+It reads TrackNumber, type, CodecID, FlagDefault (audio: default index +0x35), Language (3 bytes, record +0x88 /
++0x38), Name and CodecPrivate, but not FlagForced (0x55AA) or LanguageIETF (0x22B59D). `mrParseTrackAudio`, run for
+the Audio element before the track is stored, set the count to 9 when it was more than 9 and then wrote sample rate
+and channels into record [count]: every audio track past the 10th overwrote the 10th record, and the file's last
+audio track ended up as the 10th. The proxy copies the records in `mrGetParserResult` (vtable +0x10).
+
+Code: `src/liblp/mp4/mp4.c` (`mkv_scan`, `mkv_keep`, `mkv_start`, `mkv_chg`; section `.langsel` in
+`vMPCTestSendSetFileInf2Pipe` 0x53e410, 0x898 bytes, called only from the self-test thread
+`vMPCTestPauseWithA2PipeThr`; the BCP 47 and ISO 639 helpers are in `.subtx3g`), shims `k_tracks`, `k_aud`, `k_sub`,
+`k_start`, `m_chgsp` in `src/liblp/mp4/shims.S`. State `struct ml` at 0x757d00 (bss slack between the end of .bss,
+0x757cd4, and dvhook's state at 0x757e00): parser, track numbers left out and forced (bit per number < 128), forced
+subtitle records, counters, the last Subtitle Language value. `dvhook.sh mkv` prints it.
+
+| Site (runtime VA) | Was | Now |
+|---|---|---|
+| 0x3c57ec, 0x3c2ff0 `bl mrParseTracks` (r2:r3 = Tracks size) | dvhook H0 | `k_tracks` → `mkv_scan`, then H0: the Tracks element is read ahead in one piece (`x_mem_alloc`, at most 64 KB; `CLpMkvParser::mrMkvReadDataFromBuffer` 0x3b3a40 at the parser's position +0x21f8), parsed with Matroska defaults (Language `eng`, FlagDefault 1); afterwards +0x21f8 is restored and +0x2944 (bytes left in the read buffer) set to 0 so the parser refills from there. With a language list and more than 10 audio / 32 subtitle tracks the tracks are chosen as in the MP4 pre-scan (forced tracks of unlisted languages left out first) |
+| 0x3c0578 `cmp r1, #9`, 0x3c0920 `cmp r2, #31` | count checks | `b k_aud` / `b k_sub` → `mkv_keep` (TrackNumber at `[sp,#72]`, parser r6): left out → `b 0x3c0a64` (the unknown-type path, which frees the track's allocations); kept → the compare, back. Subtitle records of forced tracks are noted by index |
+| 0x3b68e4 `bls` (`mrParseTrackAudio`) | count > 9 → set to 9, write record 9 | `b`: count stays, the record pointer is 0 and nothing is written |
+| 0x3bac6c `mov r0, #11` (`CLpMkvParser::eMapPBAudioCodec`, `A_TRUEHD`; r5 parser, r6 record) | PB code 0xb, named "MLP" | `bl k_thd` → `mkv_thd`: 0x1a ("Dolby TrueHD") or, for a track `thd_scan` found Atmos in, 8 (SDDS). Both give decoder control 0 in `eMapAudioCodec2Ctrl` (the decoder type comes from `eMapMpcAudDecType`); the code goes to the menus (messages 0x43, 0x6e) and the file query |
+| player program: pointers to "SDDS" at 0x7d99dc, 0x7da328, 0x7df664 (front display), 0x8f4300 (`FUN_008f4100`, audio text), 0xa72e50 (IP control or front display, not told apart); 0x100f7a0 = entry 8 of the long-press Info panel's table (0x100f780, by code), a filler "LPCM"; `osdmsg.bin` string 936 in the RAM table 0x1a55cd4 (12 pointers, the info bar and audio menu) | "SDDS" | "Dolby Atmos" (ASCII at liblp 0x757cd8, UTF-16 at 0x757ce4, bss slack); written by `dvhook.sh on` only after the program check and when each word still holds its stock value; string 936's pointers are saved to `/tmp/dvhook-s936.bin` for `off` |
+| 0x4e7fb4 `bl mrMapPBACodeMode` (`CLpMpcWrapper::vMsgAElmStrmCallback`: the audio the decoder reports, the long-press Info panel) | decoder type 6 = 0xb, "MLP" | `k_aelm` → `mkv_aelm`: while an MKV plays on this wrapper, `mkv_thd` of its current audio record |
+| MKV proxy vtable: `mrStop` 0x6de630, `mrUnInit` 0x6de614, destructor 0x6de608 + GOT 0x6ead24 | | `k_stop`, `k_uninit`, `k_dtor` → `mkv_dtor`: forget the proxy `mkv_start` noted (it is not destroyed on stop), so that nothing but a playing MKV is renamed. DVD-Audio MLP not tested |
+| 0x3d68f8 `bl mrMkvSetStreamInf` (`mrOnStateSettingFileInfo`) | | `k_start` → `mkv_start`: reads Subtitle Language and the OSD language from the player program (`a_cfg_get_subtitlelanguage` 0x7ba644 / `a_cfg_get_osdlanguage` 0x7ba3b8, Thumb, acfg items 0x3a / 0x37; values are indexes of the 10-byte ISO 639 table at 0x1252068, entry = index, index, 3 letters, 2 letters, `_`; English 0x7e, Off 0x1e4, Auto 0x1e5, OSD Traditional Chinese 0x1e6). `dvhook.sh on` stores these three addresses only after checking 16 bytes of each getter and the English entry (one line per player program in `dvhook.sh`, `src/porting/findnames.py`); otherwise the start stays stock. Armed with Auto, or with `forced_subs` and a language |
+| vtable 0x6de654 `CLpMkvMediaManagerProxy::mrChangeSpStNo` | | `m_chgsp` → `mkv_chg`: when armed, the first call that switches a subtitle on (`PB_SPSTN_PARAM_T` +4 number, +5 on) is changed. Target language: Subtitle Language, for Auto the OSD language (Chinese menus: Simplified `zs`, 0x1e6 Traditional `zt`). Track keys come from the read-ahead (by track number, record → number noted in `mkv_keep`; `LanguageIETF` included), else the record's language. Exact key first, then any Chinese. `forced_subs` on: only FlagForced tracks, none → +5 = 0. Off (Auto only): the Default flag preferred, else the first match, else the player's choice |
+
+**Atmos.** `mkv_scan` notes `A_TRUEHD` tracks; with any, `thd_scan` walks the Segment from the end of Tracks to the
+first Cluster (element headers only) and through its children by position (at most 200; a BlockGroup is entered),
+reading 96 bytes of each SimpleBlock / Block of a TrueHD track: the first major sync (`F8 72 6F BA`, signature
+`B7 52` at +8) gives the number of substreams (+16, high nibble) and substream_info (+17); 4 substreams and bit 7
+(16-channel presentation) = Atmos, kept as a bit per track number. The parser's read position is restored afterwards.
+
+The start choice is the player program's, not liblp's: the stream setup leaves subtitles off (0xdf answer 0), then
+the program calls `mrChangeSpStNo` twice (number 0 off, then a number on). With Auto it always takes number 1, the
+file's first subtitle track (checked with a file whose first track is French: stock showed French with English menus). MKV `LanguageIETF` and MP4
+`elng` (Apple, in `mdia`, read by the MP4 pre-scan for Chinese tracks) give the selection keys `zs` (Hans, CN, SG) and
+`zt` (Hant, TW, HK, MO); `dvhook.sh langs` turns `zh`, `zh-cn` into `zs` and `zh-tw` into `zt`, `chi` stays `zh`
+(Chinese tracks without a tag). The menus still get the plain language codes.
 
 ## Part 2: bdpdrv1 (profile 7)
 
@@ -1210,15 +1306,21 @@ highlight there ran the list's highlight callback with the shared "just got the 
 set, and the page then kept the frame of an option list and the bar on the category.
 
 **Saving and switching.** A chosen value rewrites `options.txt` (each option's `key = value` line replaced, missing
-ones added at the end, other lines kept; written to `options.txt.tmp`, `fsync`, `rename`). `dv_mkv` and `dv_l5` are
-switched in the running patches at once; `xtmenu.sh` hands over where: `dvhook.sh dvaddr` (a flag byte in dvhook's
+ones added at the end, other lines kept; written to `options.txt.tmp`, `fsync`, `rename`). `dv_mkv`, `dv_l5` and
+`forced_subs` (v2.2.0: `dvhook.sh fsaddr`, the `fopt` byte of Part 1f's state, header +176) are switched in the
+running patches at once; `xtmenu.sh` hands over where: `dvhook.sh dvaddr` (a flag byte in dvhook's
 state in liblp, offset 0x48: 1 = the MKV hook leaves the file to the player, as `dvhook.sh dv off` does) and
 `dvcm.sh l5pa` (the physical address of the one instruction in dvcm's driver stub that keeps L5: `sub r3,r2,#6`,
 `0xe2423006`; Oppo's `sub r3,r2,#5`, `0xe2423005`, drops it, as `dvcm.sh l5 off` does; written through `/dev/mem`
 only when one of the two values is there). The other options are read at boot as before.
 
-Strings: the page's own texts are in the code (English); On and Off are Oppo's strings 1553 / 1554 of `osdmsg.bin`
-(table `0x01a55cd4`, `[id * 12 + language]`), so they follow the menu language.
+Strings: the page's own texts are in the code (`src/setupmenu/xtext.h`, 12 languages in Setup's order: en de fr es it
+sv nl pl zh-CN zh-TW ja ru, chosen by Setup's language index `GW(0x14)`, the same one `osdmsg.bin` strings use); On and
+Off are Oppo's strings 1553 / 1554 of `osdmsg.bin` (table `0x01a55cd4`, `[id * 12 + language]`). After a change of the player's language Setup writes its own
+category texts into rows 0..6 (its row 6 is Exit, string 1481), so every highlight / focus of the category list first
+puts back row 6 (Extras) and row 7 (string 1481) and refreshes the page and option-list texts (v2.2.0). The fonts
+for Chinese, Japanese and Russian menus are loaded at boot (Oppo asks for a restart); every text was checked on the
+TV in those fonts.
 
 ## Player program layouts
 

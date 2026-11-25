@@ -48,10 +48,12 @@ if [ -f $D/hvccfix.sh ]; then   # MKVs whose hvcC has no VPS/SPS/PPS (kernel); D
 fi
 [ -f $D/ftrfix.sh ] && run ftrfix "MP4 stop" sh $D/ftrfix.sh on           # hang at the next file after an MP4 with audio was stopped (kernel)
 [ -f $D/mp4elfix.sh ] && run mp4elfix "MP4 profile 7" sh $D/mp4elfix.sh on   # profile 7 MP4s that stop after a second (kernel)
-if [ -f $D/dvhook.sh ] && [ -f $D/languages.txt ]; then   # MP4: which 8 audio/subtitle tracks to keep (languages.txt)
+if [ -f $D/dvhook.sh ] && [ -f $D/languages.txt ]; then   # MP4 / MKV: which audio/subtitle tracks to keep (languages.txt)
   c=$(tr -d '\r' < $D/languages.txt | grep -v '^[[:space:]]*#' | awk 'NF{print $1}')
-  [ -n "$c" ] && run dvhook "MP4 languages" sh $D/dvhook.sh langs $c
+  [ -n "$c" ] && run dvhook "languages" sh $D/dvhook.sh langs $c
 fi
+[ -f $D/dvhook.sh ] && [ "$(opt forced_subs)" = on ] && run dvhook "forced subtitles" sh $D/dvhook.sh forced on   # MKV: forced subtitles only
+[ -f $D/isomusic.sh ] && run isomusic "ISO under Music" sh $D/isomusic.sh on   # ISO files in the Music lists too (jailbreak programs)
 [ -f $D/bdpaudec.db ] && log "audio: /res/bdpaudec.db -> $(ls -l /res/bdpaudec.db 2>/dev/null | sed 's/.*-> //')"   # set by the wrapper
 [ -f $D/subs.sh ] && run subs "subtitles" sh $D/subs.sh                   # improved subtitles
 [ -f $D/fpage.sh ] && run menu "factory menu" sh $D/fpage.sh on           # factory menu shortcut
