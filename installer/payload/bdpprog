@@ -1,7 +1,7 @@
 #!/bin/sh
 # oppo-dv-mkv boot wrapper: /mnt/ubi_boot/bdpprog
 # The jailbreak firmware's launcher (/usr/local/bin/bdpprog) runs this file instead of bdpprog.1 when it exists.
-# It swaps in the rebuilt resources (subtitle-menu image, audio decoder file), starts the RAM patcher in the
+# It swaps in the rebuilt resources (subtitle-menu image, audio decoder file, subtitle font), starts the RAM patcher in the
 # background, then runs the real player and hands its exit code back to rc5. If the jb_overlay mod was installed
 # first, its boot script was saved as /mnt/ubi_boot/bdpprog.prev and is run instead of the player (it starts its own
 # copy of the player).
@@ -18,7 +18,7 @@ PLAYER=${OPPODV_PLAYER:-/usr/local/bin/bdpprog.1}
 PREV=${OPPODV_PREV:-/mnt/ubi_boot/bdpprog.prev}
 [ -f $PREV ] && PLAYER=$PREV
 # Replacement resources name:md5 - each swapped into /res only if its md5 matches (RAM only: /res is rebuilt at boot)
-RES="image_bdp83.bin:44bedb87bacfc5217ec22cffd2b18295 bdpaudec.db:31b1901fc4114ea4911ff04757959651"
+RES="image_bdp83.bin:44bedb87bacfc5217ec22cffd2b18295 bdpaudec.db:31b1901fc4114ea4911ff04757959651 font.bin:7ffd6c8c88be9d4787ba0cf36e91b424"
 MODS=0
 if [ ! -e $D/disable ]; then
   N=$(cat $D/bootcount 2>/dev/null); N=${N:-0}

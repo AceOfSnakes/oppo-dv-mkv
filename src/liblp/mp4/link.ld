@@ -7,6 +7,8 @@ orig_tkhd   = 0x4304d8;   /* CLpMp4Parser::vMP4TKHDHandle */
 orig_gsi    = 0x4085b8;   /* CLpMp4Parser::mrGetStreamInfo */
 orig_extsub = 0x3eb53c;   /* CLpMp4MediaManagerProxy::vSetExtSubLanguage */
 orig_srt    = 0x58a768;   /* mrSpsDecStringByFmtSRT */
+orig_ass    = 0x58a4d0;   /* mrSpsDecStringByFmtASS */
+orig_anal   = 0x3a6318;   /* CLpSpParser::vAnalyzeFileFormat() */
 hdlr_sub    = 0x403f20;   /* vMP4HDLRHandle: 'subp' path (subtitle track) */
 hdlr_other  = 0x403fe8;   /* vMP4HDLRHandle: other handler types */
 stsd_drop   = 0x4291d8;   /* vMP4STSDHandle: rest of "drop this subtitle track" */
@@ -22,6 +24,15 @@ TSFile_TimeExpired = 0x163f8c; /* .plt */
 TSFile_Start = 0x14b4d0;       /* .plt */
 fgSpsDecStateNeedTrigger = 0x57ab24;
 mrSpsDecGetState = 0x579d0c;
+kaud_ret = 0x3c057c;      /* mrParseTrackEntry: after the audio count check */
+ksub_ret = 0x3c0924;      /* mrParseTrackEntry: after the subtitle count check */
+ktrk_drop = 0x3c0a64;     /* mrParseTrackEntry: track of no known type (freed, not stored) */
+orig_mkvchgsp = 0x3e05a8;
+orig_mkvstop = 0x3dfa9c;  /* CLpMkvMediaManagerProxy::mrStop */
+orig_mkvuninit = 0x3d7780; /* CLpMkvMediaManagerProxy::mrUnInit */
+orig_mkvdtor = 0x3c83f0;  /* CLpMkvMediaManagerProxy::~CLpMkvMediaManagerProxy (D1) */
+orig_mapcode = 0x1670a0;  /* .plt CLpMpcWrapper::mrMapPBACodeMode */  /* CLpMkvMediaManagerProxy::mrChangeSpStNo */
+orig_mkvsetstrm = 0x14e050; /* .plt CLpMkvMediaManagerProxy::mrMkvSetStreamInf */
 rSpsTsData = 0x757c60;          /* PG timer of the subtitle decoder: +0x18 id, +0x20 when (u64), +0x28 pending */
 mrSpsThreadTriggerEvtSetEx = 0x577054;  /* (runtime VA; Ghidra shows +0x10000) */
 SECTIONS {
@@ -29,9 +40,15 @@ SECTIONS {
   .cave5 : { *(.text.cave5) }
   . = 0x530de8;            /* vMPCTestDvdRwdSpeedThr, 0x9e4 bytes: moov pre-scan */
   .cave3 : { *(.text.cave3) }
+  . = 0x53276c;            /* vMPCTestPauseWithAThr, 0x810 bytes: MP4 tx3g styles */
+  .cave7 : { *(.subtx3g) }
   . = 0x53f4c4;            /* vMPCTestOperation1, 0x7fc bytes: subtitle fixes (MKV VobSub palette, MP4 VobSub size) */
   .cave4 : { *(.text.cave4) }
   . = 0x5402fc;            /* vMPCTestOperation4, 0xae8 bytes: shims, hooks, language table */
   .text : { KEEP(*(.text.entry)) *(.text .text.*) *(.rodata*) }
+  . = 0x53e410;            /* vMPCTestSendSetFileInf2Pipe, 0x898 bytes: MKV language list, forced subtitles */
+  .cave8 : { *(.langsel) }
+  . = 0x542360;            /* vMPCMpgFilePbTest, 0x9fc bytes: text subtitles (tags, top position) */
+  .cave6 : { *(.subtext) }
   /DISCARD/ : { *(.interp) *(.dynsym) *(.dynstr) *(.hash) *(.gnu.hash) *(.dynamic) *(.ARM.exidx*) *(.ARM.extab*) *(.comment) *(.data*) *(.bss*) *(.debug*) }
 }

@@ -78,7 +78,7 @@ call(){ wr32 $((XL + 12)) $1; wr32 $((XL + 16)) ${2:-0}; wr32 $((XL + 20)) ${3:-
 loaded(){ [ "$(rdh $XM 4)" = 58544d4e ]; }
 st(){ loaded || { echo "not loaded"; return; }
   e=$(rd32 $((XM + 16))); [ $e -ge $((0x80000000)) ] && e=$((e - 0x100000000))
-  echo "status $(rd32 $((XM + 12))) err $e inserts $(rd32 $((XM + 132))) box $(rd32 $((XM + 140))) saves $(rd32 $((XM + 20)))/$(rd32 $((XM + 24))) live dv $(rd32 $((XM + 144))) l5 $(rd32 $((XM + 148)))"; }
+  echo "status $(rd32 $((XM + 12))) err $e inserts $(rd32 $((XM + 132))) box $(rd32 $((XM + 140))) saves $(rd32 $((XM + 20)))/$(rd32 $((XM + 24))) live dv $(rd32 $((XM + 144))) l5 $(rd32 $((XM + 148))) fs $(rd32 $((XM + 176)))"; }
 case "$CMD" in
 check) log "supported";;
 status) log "$(st)";;
@@ -97,10 +97,11 @@ on)
     loaded || { log "writing the code failed"; exit 1; }
   fi
   [ "$(rd32 $((XM + 12)))" = 3 ] && { log "failed before: $(st)"; exit 1; }
-  # what the page switches at once: dvhook's Dolby Vision byte, dvcm's L5 word (0 = not on, the page then only saves)
+  # what the page switches at once: dvhook's Dolby Vision and forced_subs bytes, dvcm's L5 word (0 = not on, the page then only saves)
   a=$(sh $D/dvhook.sh dvaddr 2>/dev/null); case "$a" in ''|*[!0-9]*) a=0;; esac
   l=$(sh $D/dvcm.sh l5pa 2>/dev/null); case "$l" in ''|*[!0-9]*) l=0;; esac
-  wrs $((XM + 36)) "$OPTS" 96; wr32 $((XM + 144)) $a; wr32 $((XM + 148)) $l; wrs $((XM + 152)) "$(printf '%s' "$2" | cut -c1-23)" 24
+  f=$(sh $D/dvhook.sh fsaddr 2>/dev/null); case "$f" in ''|*[!0-9]*) f=0;; esac
+  wrs $((XM + 36)) "$OPTS" 96; wr32 $((XM + 144)) $a; wr32 $((XM + 148)) $l; wrs $((XM + 152)) "$(printf '%s' "$2" | cut -c1-23)" 24; wr32 $((XM + 176)) $f
   call $(rd32 $((XM + 8))) 0 || exit 1
   [ "$RET" = 0 ] || { log "init failed: $(st)"; exit 1; }
   n=0; while [ "$(rd32 $((XM + 12)))" = 1 ] && [ $n -lt 100 ]; do sleep 0.1; n=$((n + 1)); done

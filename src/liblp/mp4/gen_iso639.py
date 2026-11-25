@@ -34,13 +34,14 @@ for l in pycountry.languages:
 names.update({'iw': names.get('he', 'Hebrew'), 'bh': 'Bihari', 'mo': 'Moldavian', 'sr': names.get('sr', 'Serbian'), 'hr': names.get('hr', 'Croatian')})
 by2 = {}
 for k, v in ent.items(): by2.setdefault(v, []).append(k)
-HEAD = """# oppo-dv-mkv: audio and subtitle languages for MP4 files
+HEAD = """# oppo-dv-mkv: audio and subtitle languages for MP4 and MKV files
 #
-# The player can use at most 8 audio tracks and 8 subtitle tracks of a file. Most MP4 files have fewer, and then
-# this list changes nothing. When a file has more (multi-language files can carry 40 subtitle tracks), the
-# player keeps the first 8 in the file and never shows the others.
+# The player can use at most 8 audio and 8 subtitle tracks of an MP4 file, and at most 10 audio and 32 subtitle
+# tracks of an MKV file. Most files have fewer, and then this list changes nothing. When a file has more
+# (multi-language files can carry 40 subtitle tracks), the player keeps the first ones in the file and never shows
+# the others.
 #
-# Write your languages below, one per line, most wanted first (up to 8). The 8 tracks are then chosen like this:
+# Write your languages below, one per line, most wanted first (up to 8). The tracks are then chosen like this:
 #   1. audio only: the file's default audio track always stays (it is usually the original language);
 #   2. every track in the first language of your list (normal, SDH, forced ...), then the second language, and so on;
 #   3. the slots still free are filled with the other tracks, in file order, except subtitle tracks of other
@@ -50,7 +51,9 @@ HEAD = """# oppo-dv-mkv: audio and subtitle languages for MP4 files
 # Use the 2-letter or the 3-letter code from the table below, in upper or lower case, for example:
 #   EN
 #   PT
-# Lines starting with # are ignored. With no language listed, the player keeps its own choice (the first 8 tracks).
+# Chinese: ZH or ZH-CN = Simplified Chinese, ZH-TW = Traditional Chinese (tracks tagged zh-Hans / zh-CN or
+# zh-Hant / zh-TW / zh-HK). CHI = Chinese tracks without that tag.
+# Lines starting with # are ignored. With no language listed, the player keeps its own choice (the first tracks).
 # After editing, put this file next to the AutoScript folder on the USB stick and run the installer again.
 #
 # Your languages (one per line, below this comment):

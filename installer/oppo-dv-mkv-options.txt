@@ -17,6 +17,13 @@ dv_mkv = on
 #   metadata fixes stay. From Setup > Extras: at once.
 dv_l5 = on
 #
+# forced_subs = on | off
+#   MKV files: start on the subtitle track with the Forced flag (MKVToolNix "Forced display") in the language set in
+#   Setup > Playback Setup > Language > Subtitle Language (Auto: the player's menu language), for the lines in another
+#   language; no such track = subtitles off. off = the player's own choice (with Subtitle Language = Auto: the track in
+#   the menu language, see the README). Subtitles chosen during the film are not changed. From Setup > Extras: at once.
+forced_subs = off
+#
 # native_25p = on | off
 #   HD video (MKV and MP4, H.264 or HEVC, 720 lines and up) at 25, 29.97 or 30 frames per second plays at that rate:
 #   Output Resolution Auto -> 2160p25 / 2160p30 (when the TV accepts it), Source Direct -> 1080p25 / 1080p30.
