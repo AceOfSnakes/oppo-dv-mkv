@@ -248,7 +248,7 @@ c4_l5:  push    {r4, r5, r6, r7, r8, r9, r10, lr}
         cmpne   r0, #0
         beq     5f
         add     r9, r6, #5              @ left, right, top, bottom (big-endian u16)
-        mov     r10, #0
+        bl      c4_full                 @ (cave 2: offsets meant for the uncut frame -> 0; r10 = 0)
 2:      tst     r10, #2
         addeq   r1, r7, #0xa4           @ left / right: x, w
         addne   r1, r7, #0xa8           @ top / bottom: y, h
@@ -792,6 +792,44 @@ c4_map3:
 @ at PST: magic, the 8 bytes, fresh); c4_copy (any parsed frame) and c4_fixed overwrite the magic first, so it is
 @ valid only for a frame that went through c4_l5.
         .equ    PMAGIC, 0x50354c44      @ "DL5P"
+
+@ from c4_l5: r9 = the L5 offsets (big-endian u16: left right top bottom), r3 = source width, r0 = height, r7 = c4_hal.
+@ A release whose black bars were cut off (3840x1920), but whose L5 still counts them from the 16:9 frame (107 where the
+@ bars were 120): taken from the coded frame, the TV blanks that much picture at the top and bottom, and a subtitle
+@ down there opens it again and again. When the coded picture is shown whole and flatter than 16:9, and both offsets are
+@ within width / 256 of the missing bar, nothing of the coded picture is a bar: both 0. r10 = 0 on return.
+        .global c4_full
+c4_full:
+        mov     r10, #0
+        ldr     r1, [r7, #0xa4]
+        ldr     r2, [r7, #0xa8]
+        orrs    r1, r1, r2
+        bxne    lr                      @ zoomed: not the whole picture
+        add     r1, r3, r3, lsl #3
+        rsbs    r1, r0, r1, lsr #4      @ 9/16 of the width - height
+        bxle    lr
+        lsr     r1, r1, #1              @ the bar that was cut off on each side
+        lsr     r3, r3, #8
+        ldrb    r2, [r9, #4]
+        ldrb    ip, [r9, #5]
+        orr     r2, ip, r2, lsl #8
+        subs    r2, r2, r1
+        rsbmi   r2, r2, #0
+        cmp     r2, r3
+        bxgt    lr
+        ldrb    r2, [r9, #6]
+        ldrb    ip, [r9, #7]
+        orr     r2, ip, r2, lsl #8
+        subs    r2, r2, r1
+        rsbmi   r2, r2, #0
+        cmp     r2, r3
+        bxgt    lr
+        mov     r2, #0
+        strb    r2, [r9, #4]
+        strb    r2, [r9, #5]
+        strb    r2, [r9, #6]
+        strb    r2, [r9, #7]
+        bx      lr
 
 @ from c4_l5 (bl, in place of c4_gfx): r0 = the L5 offsets, r4 = the metadata buffer
         .global c4_gfxs

@@ -16,7 +16,8 @@ XL=$((0x1c07b00)); XM=$((0x1b80000)); XMLEN=$((0x10000)); GOT=$((0x11d9224))
 # fingerprints (file offset:length:md5 of the running program): the WGL / app calls used, the menu library (callback
 # registration, item insert), Setup's category list (creation, descriptor, columns, callbacks and their table), its
 # message handler and app registration, Oppo's UP/DOWN row handling and the box reset (patched), the box image, the
-# Playback page and Auto Play option list (their descriptors and columns are reused), the usleep PLT entry
+# Playback page and Auto Play option list (their descriptors and columns are reused), the usleep PLT entry,
+# the two calls that move the highlight bar
 FPS="0x738230:4:24b4a87b14675a54d0a4aea707bb462c 0x7384cc:4:8f8864c066528789a4678b5e9b1c5cc9
 0x7382f0:4:964b9281e740bbf5bb9145d1fc2dd711 0x7383c8:4:9655881e40ea182bd58d3ab3532ed5fb
 0x7384d0:4:0c13236aaac518a395f048427147d4cc 0x7384c0:4:a55fc2886b9c1a018806ed1a85ced453
@@ -34,7 +35,8 @@ FPS="0x738230:4:24b4a87b14675a54d0a4aea707bb462c 0x7384cc:4:8f8864c066528789a467
 0x822582:272:c3536f182228d0ed786f51d031df7093 0xadf3b0:56:3fbcac621608012014e9a3adf85e20bf
 0x1262ed4:252:c585b258db75a62ed2c9c0e6c9ba344e 0x1262d20:216:68d913dd3f4436d91ec4436a77100b76
 0x12612a0:216:ebc91c67f95e7514ff353c2794ea1e06 0x124d2a4:56:394a40d7cceda3a491073e851d28aa8f
-0x2a94c:12:f026759f7f63d653e81d170c8e1304f2"
+0x2a94c:12:f026759f7f63d653e81d170c8e1304f2 0x81bcf8:44:6421b82477de7f3b54866d5d4e32541f
+0x81c0bc:52:665244fa514c2ed554cc6281f25777a8"
 log(){ echo "$*"; }
 pid(){ ps | awk '$4 ~ /(^|\/)bdpprog\.1$/{print $1; exit}'; }
 P=${OPPODV_PID:-$(pid)}

@@ -13,7 +13,7 @@ llvm-objcopy -O binary build/dvhook.elf build/dvhook.bin
 zig cc -target thumb-freestanding-eabi $F -ffunction-sections -c mp4/mp4.c -o mp4/build/mp4.o
 zig cc -target arm-freestanding-eabi $F -c mp4/shims.S -o mp4/build/shims.o
 H0=$(llvm-nm build/dvhook.elf | awk '$3 == "h0_tracks" {print "0x" $1}')   # MKV Tracks hook: k_tracks ends there
-ld.lld -static -T mp4/link.ld --defsym=h0_tracks=$H0 mp4/build/shims.o mp4/build/mp4.o -o mp4/build/mp4.elf
+ld.lld -static -T mp4/link.ld --defsym=h0_tracks=$H0 --defsym=h2_mmed=0x$(llvm-nm build/dvhook.elf | awk '$3 == "h2_mmed" {print $1}') mp4/build/shims.o mp4/build/mp4.o -o mp4/build/mp4.elf
 llvm-objcopy -O binary -j .text mp4/build/mp4.elf mp4/build/mp4.bin
 llvm-objcopy -O binary -j .cave3 mp4/build/mp4.elf mp4/build/mp4b.bin
 llvm-objcopy -O binary -j .cave4 mp4/build/mp4.elf mp4/build/mp4c.bin
@@ -21,6 +21,10 @@ llvm-objcopy -O binary -j .cave5 mp4/build/mp4.elf mp4/build/mp4d.bin
 llvm-objcopy -O binary -j .cave6 mp4/build/mp4.elf mp4/build/mp4e.bin
 llvm-objcopy -O binary -j .cave7 mp4/build/mp4.elf mp4/build/mp4f.bin
 llvm-objcopy -O binary -j .cave8 mp4/build/mp4.elf mp4/build/mp4g.bin
+llvm-objcopy -O binary -j .cave9 mp4/build/mp4.elf mp4/build/mp4h.bin
+llvm-objcopy -O binary -j .cave10 mp4/build/mp4.elf mp4/build/mp4i.bin
+[ $(stat -c %s mp4/build/mp4i.bin) -le 736 ] || { echo "HDR10+ blob does not fit vMPCTestPlayMpgThr"; exit 1; }
+[ $(stat -c %s mp4/build/mp4h.bin) -le 1052 ] || { echo "Dolby Digital Plus blob does not fit vMPCTestPlayVcdThr"; exit 1; }
 [ $(stat -c %s mp4/build/mp4.bin) -le 2792 ] || { echo "mp4 blob does not fit vMPCTestOperation4"; exit 1; }
 [ $(stat -c %s mp4/build/mp4b.bin) -le 2532 ] || { echo "mp4 pre-scan blob does not fit vMPCTestDvdRwdSpeedThr"; exit 1; }
 [ $(stat -c %s mp4/build/mp4c.bin) -le 2044 ] || { echo "subtitle blob does not fit vMPCTestOperation1"; exit 1; }
@@ -28,4 +32,4 @@ llvm-objcopy -O binary -j .cave8 mp4/build/mp4.elf mp4/build/mp4g.bin
 [ $(stat -c %s mp4/build/mp4e.bin) -le 2556 ] || { echo "text subtitle blob does not fit vMPCMpgFilePbTest"; exit 1; }
 [ $(stat -c %s mp4/build/mp4f.bin) -le 2064 ] || { echo "tx3g style blob does not fit vMPCTestPauseWithAThr"; exit 1; }
 [ $(stat -c %s mp4/build/mp4g.bin) -le 2200 ] || { echo "MKV language list blob does not fit vMPCTestSendSetFileInf2Pipe"; exit 1; }
-md5sum build/dvhook.bin mp4/build/mp4.bin mp4/build/mp4b.bin mp4/build/mp4c.bin mp4/build/mp4d.bin mp4/build/mp4e.bin mp4/build/mp4f.bin mp4/build/mp4g.bin
+md5sum mp4/build/mp4h.bin build/dvhook.bin mp4/build/mp4.bin mp4/build/mp4b.bin mp4/build/mp4c.bin mp4/build/mp4d.bin mp4/build/mp4e.bin mp4/build/mp4f.bin mp4/build/mp4g.bin
