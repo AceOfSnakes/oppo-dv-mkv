@@ -9,7 +9,7 @@
 #   /mnt/ubi_boot/bdpprog               boot wrapper (run by the jailbreak launcher instead of bdpprog.1)
 #   /mnt/ubi_boot/bdpprog.prev          the jb_overlay boot script, if that mod was installed (the wrapper chains to it)
 #   /mnt/ubi_boot/oppo-dv-mkv/          dvmkv.sh + the installed parts: dvhook.sh, p7kel.sh, bgfix.sh, sarfix.sh, arflag.sh, dvexit.sh, dvcm.sh, hvccfix.sh,
-#                                       ftrfix.sh, mp4elfix.sh, alacdec.bin, bdpaudec.db, vidopt.sh, isomusic.sh, dlnaiso, dlnaiso.sh,
+#                                       ftrfix.sh, mp4elfix.sh, alacdec.bin, bdpaudec.db, vidopt.sh, isomusic.sh, dlnaiso, dlnaiso.sh, smbbr, smbbr.sh, hdr10p.sh, audedid.sh,
 #                                       dmrhook.sh, dmrhook.bin, xtmenu.sh, xtload.bin, xtmenu.bin (Dolby Vision MKV fix),
 #                                       bootmsg.sh, bootmsg.bin (all), subs.sh,
 #                                       image_bdp83.bin, font.bin (subtitles), fpage.sh (factory menu), languages.txt (MP4/MKV language list, from
@@ -76,11 +76,13 @@ XCHECK=${OPPODV_XCHECK:-sh $S/oppo-dv-mkv/dvexit.sh check}  # Dolby Vision left 
 CCHECK=${OPPODV_CCHECK:-sh $S/oppo-dv-mkv/dvcm.sh check}    # TV-led Dolby Vision metadata, CM 2.9 / CM 4.0 (DV part; idem)
 TCHECK=${OPPODV_TCHECK:-sh $S/oppo-dv-mkv/ftrfix.sh check}  # hang at the next file after an MP4 with audio was stopped (DV part; idem)
 ECHECK=${OPPODV_ECHECK:-sh $S/oppo-dv-mkv/mp4elfix.sh check} # profile 7 MP4s that stop after a second (DV part; idem)
+PCHECK=${OPPODV_PCHECK:-sh $S/oppo-dv-mkv/hdr10p.sh check}  # HDR10+ keyframes (DV part; its own check at every boot)
 VCHECK=${OPPODV_VCHECK:-sh $S/oppo-dv-mkv/vidopt.sh check}  # video options: 25p/30p, menu refresh, default language (DV part; player program, own layouts)
 SCHECK=${OPPODV_SCHECK:-sh $S/oppo-dv-mkv/subs.sh check}
 ICHECK=${OPPODV_ICHECK:-sh $S/oppo-dv-mkv/dmrhook.sh check}  # DLNA disc images (DV part, only where the player program has the jailbreak's ISO player)
 BMCHECK=${OPPODV_BMCHECK:-sh $S/oppo-dv-mkv/bootmsg.sh check} # boot message (every part; RU 65-0131 program family)
 PGCHECK=${OPPODV_PGCHECK:-sh $S/oppo-dv-mkv/xtmenu.sh check}  # Setup > Extras page (DV part; RU 65-0131 program family)
+NCHECK=${OPPODV_NCHECK:-sh $S/oppo-dv-mkv/smbbr.sh check}   # SMB2/SMB3 in the Network menu (DV part; no player program code)
 MCHECK=${OPPODV_MCHECK:-sh $S/oppo-dv-mkv/fpage.sh check}
 RUN=$(running)
 # boot hook: free, ours, or the jb_overlay mod (chained); anything else blocks every part
@@ -98,12 +100,13 @@ elif ! grep -q "^bdpdrv1 .* 0x7e8d3000 " $MODULES; then
 elif ! DVK=$($KCHECK 2>&1); then
   DV_WHY="video driver check: $(echo $DVK) (a driver dump helps to add support for it, see the README)"
 fi
-SCK=; MCK=; ICK=; BMCK=; PGK=
+SCK=; MCK=; ICK=; BMCK=; PGK=; NCK=
 # DLNA disc images and the boot message patch the player program: where they are not supported they are left out
 # (the rest of the parts is installed as usual)
 [ -z "$DV_WHY" ] && [ -f $S/oppo-dv-mkv/dmrhook.sh ] && { ICK=$($ICHECK 2>&1) || ICK="no - $(echo $ICK)"; }
 [ -f $S/oppo-dv-mkv/bootmsg.sh ] && { BMCK=$($BMCHECK 2>&1) || BMCK="no - $(echo $BMCK)"; }
 [ -z "$DV_WHY" ] && [ -f $S/oppo-dv-mkv/xtmenu.sh ] && { PGK=$($PGCHECK 2>&1) || PGK="no - $(echo $PGK)"; }
+[ -z "$DV_WHY" ] && [ -f $S/oppo-dv-mkv/smbbr.sh ] && { NCK=$($NCHECK 2>&1) || NCK="no - $(echo $NCK)"; }
 [ -z "$SUBS_WHY" ] && [ -f $S/oppo-dv-mkv/subs.sh ] && { SCK=$($SCHECK 2>&1) || SUBS_WHY="$(echo $SCK) (a full dump helps to add support for it, see the README)"; }
 MENU_NN=   # set to fpage.sh's "not needed: ..." message
 if [ -f $S/oppo-dv-mkv/fpage.sh ]; then MCK=$($MCHECK 2>&1); case $? in
@@ -125,6 +128,7 @@ if [ -e $S/CHECKONLY ]; then
   [ -f $S/oppo-dv-mkv/hvccfix.sh ] && echo "hvcC:      $($HCHECK 2>&1 | tr '\n' ' ')  (splitter: $(grep '^splitter ' $MODULES | cut -d' ' -f1,2,6))"
   [ -f $S/oppo-dv-mkv/ftrfix.sh ] && echo "MP4 stop:  $($TCHECK 2>&1 | tr '\n' ' ')"
   [ -f $S/oppo-dv-mkv/mp4elfix.sh ] && echo "MP4 P7:    $($ECHECK 2>&1 | tr '\n' ' ')"
+  [ -f $S/oppo-dv-mkv/hdr10p.sh ] && echo "HDR10+:    $($PCHECK 2>&1 | tr '\n' ' ')"
   [ -f $S/oppo-dv-mkv/alacdec.bin ] && echo "audio db:  $(m5 $DBORIG)  (ALAC decoder swap needs 0abee82b1ea7bc77d3db30907355376b)"
   [ -f $S/oppo-dv-mkv/vidopt.sh ] && echo "video options: $($VCHECK 2>&1 | tr '\n' ' ')"
   [ -f $S/oppo-dv-mkv/isomusic.sh ] && echo "ISO under Music: $(sh $S/oppo-dv-mkv/isomusic.sh check 2>&1 | tr '\n' ' ')"
@@ -135,6 +139,7 @@ if [ -e $S/CHECKONLY ]; then
   [ -f $S/oppo-dv-mkv/dmrhook.sh ] && echo "DLNA ISO:  $(echo ${ICK:-no - needs the Dolby Vision MKV fix})"
   [ -f $S/oppo-dv-mkv/bootmsg.sh ] && echo "boot message: $(echo $BMCK)"
   [ -f $S/oppo-dv-mkv/xtmenu.sh ] && echo "Setup page: $(echo ${PGK:-no - needs the Dolby Vision MKV fix})"
+  [ -f $S/oppo-dv-mkv/smbbr.sh ] && echo "SMB2/SMB3: $(echo ${NCK:-no - needs the Dolby Vision MKV fix})"
   echo "launcher:  $(m5 $LAUNCHER), starts /mnt/ubi_boot/bdpprog: $(grep -q /mnt/ubi_boot/bdpprog $LAUNCHER 2>/dev/null && echo yes || echo NO)"
   echo "module:    $(grep '^bdpdrv1 ' $MODULES)"
   if [ -e $U/bdpprog ]; then
@@ -160,9 +165,20 @@ fi
 grep -q "/mnt/ubi_boot/bdpprog" $LAUNCHER 2>/dev/null || fail "launcher does not start /mnt/ubi_boot/bdpprog - this jailbreak is not supported"
 [ -d $U ] && touch $U/.oppodv && rm -f $U/.oppodv || fail "$U is not writable"
 
+# The version that is installed now may still be loading at this boot (until ~35-45 s); it starts its parts one by one
+# from $D. Replacing them meanwhile mixed old patches and new scripts ("NOT loaded: hvcC" on screen after an update).
+# Its last step in every release is "sleep 90" (then it marks the boot healthy): wait for that, at most 60 s.
+PSARGS=${OPPODV_PSARGS:-ps ax -o pid,ppid,args}
+loading(){ $PSARGS 2>/dev/null | awk '($3 == "sh" || $3 ~ /\/sh$/) && $4 ~ /\/oppo-dv-mkv\/dvmkv\.sh$/{d[$1] = 1; n = 1}
+  $3 ~ /(^|\/)sleep$/ && $4 == "90"{s[$2] = 1} END{for (p in s) if (p in d) exit 1; exit !n}'; }
+waitload(){ w=0
+  while [ $w -lt ${OPPODV_WAIT:-60} ] && loading; do w=$((w+1)); sleep 1; done
+  [ $w = 0 ] || echo "waited $w s for the installed version to finish loading, uptime $(cut -d' ' -f1 /proc/uptime)s"; }
+
 # --- uninstall ---
 if [ -e $S/UNINSTALL ]; then
   if [ -e $U/bdpprog ] && ! ours; then fail "$U/bdpprog belongs to another mod; not touching it"; fi
+  waitload
   if [ -f $PREV ]; then   # give the boot hook back to the jb_overlay mod
     cp $PREV $U/bdpprog.tmp && chmod 755 $U/bdpprog.tmp && sync && mv $U/bdpprog.tmp $U/bdpprog && sync && rm -f $PREV \
       || fail "restoring the jb_overlay boot script"
@@ -188,6 +204,7 @@ echo "firmware: bdpprog.1 md5 $(m5 $PLAYER), running player program ${RUN:-unkno
   && echo "MKVs without VPS/SPS/PPS in the hvcC: $($HCHECK 2>&1)" \
   && echo "next file after a stopped MP4 with audio: $($TCHECK 2>&1)" \
   && echo "profile 7 MP4s that stop after a second: $($ECHECK 2>&1)" \
+  && echo "HDR10+: $($PCHECK 2>&1)" \
   && echo "video options: $($VCHECK 2>&1 | tr '\n' ' ')"
 [ -n "$SUBS" ] && [ -z "$SUBS_WHY" ] && echo "subtitles: $(echo $SCK)"
 [ -n "$MENU" ] && [ -z "$MENU_WHY" ] && echo "factory menu: $(echo $MCK)"
@@ -195,6 +212,8 @@ ISO=; [ -n "$DV" ] && [ -z "$DV_WHY" ] && [ "$ICK" = supported ] && ISO=1
 [ -n "$DV" ] && [ -z "$DV_WHY" ] && echo "DLNA disc images: $(echo ${ICK:-not in this zip})"
 PAGE=; [ -n "$DV" ] && [ -z "$DV_WHY" ] && [ "$PGK" = supported ] && PAGE=1
 [ -n "$DV" ] && [ -z "$DV_WHY" ] && echo "Setup > Extras page: $(echo ${PGK:-not in this zip})"
+SMB=; [ -n "$DV" ] && [ -z "$DV_WHY" ] && [ "$NCK" = supported ] && SMB=1
+[ -n "$DV" ] && [ -z "$DV_WHY" ] && echo "SMB2/SMB3 shares: $(echo ${NCK:-not in this zip})"
 BMSG=; [ "$BMCK" = supported ] && BMSG=1
 echo "boot message: $(echo ${BMCK:-not in this zip})"
 for p in DV SUBS MENU; do
@@ -213,12 +232,13 @@ if [ -z "$DV$SUBS$MENU" ] && [ -n "$MENU_NN" ] && [ -z "$IN_DV$IN_SUBS" ]; then
   HEAD="NOTHING TO INSTALL - this player does not need it. Nothing was changed."; result; exit 0
 fi
 [ -n "$DV$SUBS$MENU" ] || fail "none of the parts in this zip can be installed safely on this player"
-FILES="dvmkv.sh${BMSG:+ bootmsg.sh bootmsg.bin}${DV:+ dvhook.sh p7kel.sh bgfix.sh sarfix.sh arflag.sh dvexit.sh dvcm.sh hvccfix.sh ftrfix.sh mp4elfix.sh alacdec.bin vidopt.sh isomusic.sh}${ISO:+ dlnaiso dlnaiso.sh dmrhook.sh dmrhook.bin}${PAGE:+ xtmenu.sh xtload.bin xtmenu.bin}${SUBS:+ subs.sh}${MENU:+ fpage.sh}"
+FILES="dvmkv.sh${BMSG:+ bootmsg.sh bootmsg.bin}${DV:+ dvhook.sh p7kel.sh bgfix.sh sarfix.sh arflag.sh dvexit.sh dvcm.sh hvccfix.sh ftrfix.sh mp4elfix.sh hdr10p.sh audedid.sh alacdec.bin vidopt.sh isomusic.sh}${ISO:+ dlnaiso dlnaiso.sh dmrhook.sh dmrhook.bin}${SMB:+ smbbr smbbr.sh}${PAGE:+ xtmenu.sh xtload.bin xtmenu.bin}${SUBS:+ subs.sh}${MENU:+ fpage.sh}"
 for f in $FILES bdpprog ${SUBS:+$(for q in $SQUARES; do echo sq$q.png; done) font.bin.gz}; do
   [ -f $S/oppo-dv-mkv/$f ] || fail "missing $f on the stick (unzip the whole release)"
   grep -q " $f\$" $S/oppo-dv-mkv/MD5SUMS && [ "$(m5 $S/oppo-dv-mkv/$f)" = "$(grep " $f\$" $S/oppo-dv-mkv/MD5SUMS | cut -d' ' -f1)" ] \
     || fail "$f on the stick is corrupt (md5 mismatch) - re-copy the release"
 done
+waitload
 WROTE=1; mkdir -p $D || fail "cannot create $D"
 put(){  # atomic copy: $1 source, $2 destination
   [ "$(m5 $1)" = "$(m5 $2)" ] && { echo "  $2 up to date"; return 0; }
@@ -226,8 +246,9 @@ put(){  # atomic copy: $1 source, $2 destination
   echo "  $2 installed"
 }
 for f in $FILES; do put $S/oppo-dv-mkv/$f $D/$f || fail "writing $D/$f"; done
-[ -z "$DV" ] && [ -e $D/p7kel.sh ] && rm -f $D/dvhook.sh $D/p7kel.sh $D/bgfix.sh $D/sarfix.sh $D/arflag.sh $D/dvexit.sh $D/dvcm.sh $D/hvccfix.sh $D/ftrfix.sh $D/mp4elfix.sh $D/alacdec.bin $D/bdpaudec.db $D/vidopt.sh $D/isomusic.sh && echo "  Dolby Vision MKV fix not installed now: older copy removed"
+[ -z "$DV" ] && [ -e $D/p7kel.sh ] && rm -f $D/dvhook.sh $D/p7kel.sh $D/bgfix.sh $D/sarfix.sh $D/arflag.sh $D/dvexit.sh $D/dvcm.sh $D/hvccfix.sh $D/ftrfix.sh $D/mp4elfix.sh $D/hdr10p.sh $D/audedid.sh $D/alacdec.bin $D/bdpaudec.db $D/vidopt.sh $D/isomusic.sh && echo "  Dolby Vision MKV fix not installed now: older copy removed"
 [ -z "$ISO" ] && [ -e $D/dmrhook.sh ] && rm -f $D/dlnaiso $D/dlnaiso.sh $D/dmrhook.sh $D/dmrhook.bin && echo "  DLNA disc images not installed now: older copy removed"
+[ -z "$SMB" ] && [ -e $D/smbbr.sh ] && rm -f $D/smbbr $D/smbbr.sh && echo "  SMB2/SMB3 shares not installed now: older copy removed"
 [ -z "$BMSG" ] && [ -e $D/bootmsg.sh ] && rm -f $D/bootmsg.sh $D/bootmsg.bin && echo "  boot message not installed now: older copy removed"
 [ -z "$PAGE" ] && [ -e $D/xtmenu.sh ] && rm -f $D/xtmenu.sh $D/xtload.bin $D/xtmenu.bin && echo "  Setup > Extras page not installed now: older copy removed"
 if [ -n "$DV" ]; then
@@ -253,7 +274,7 @@ fi
 OS=${S%/*}/oppo-dv-mkv-options.txt
 if [ -f $OS ]; then put $OS $D/options.txt || fail "writing $D/options.txt"
   v(){ x=$(tr -d '\r' < $OS | grep -v '^[[:space:]]*#' | sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\([A-Za-z0-9_-]*\).*/\1/p" | sed -n '$p' | tr A-Z a-z); echo ${x:-${2:-stock}}; }
-  echo "  options: dv_mkv $(v dv_mkv on), dv_l5 $(v dv_l5 on), forced_subs $(v forced_subs off), native_25p $(v native_25p), menu_refresh $(v menu_refresh), default_language $(v default_language), dlna_iso $(v dlna_iso on), boot_message $(v boot_message on), setup_extras $(v setup_extras on)"
+  echo "  options: dv_mkv $(v dv_mkv on), dv_l5 $(v dv_l5 on), forced_subs $(v forced_subs off), native_25p $(v native_25p), menu_refresh $(v menu_refresh), default_language $(v default_language), dlna_iso $(v dlna_iso on), hdr10plus $(v hdr10plus on), dynamic_hdr $(v dynamic_hdr dv), audio_edid_override $(v audio_edid_override off), smb23 $(v smb23 on), boot_message $(v boot_message on), setup_extras $(v setup_extras on)"
 elif [ -f $D/options.txt ]; then echo "  $D/options.txt kept (no oppo-dv-mkv-options.txt on the stick)"; fi
 [ -z "$MENU" ] && [ -e $D/fpage.sh ] && rm -f $D/fpage.sh && echo "  factory menu shortcut not installed now: older copy removed"
 if [ -n "$SUBS" ]; then

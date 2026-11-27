@@ -30,6 +30,8 @@ typedef int i32;
 #define HTYPE_OBJ ((int (*)(u32, u16 *, u32 *))0x00784ccc)      /* handle_get_type_obj (no lock: WGL's 0x6b9178 locks) */
 #define TPL_CREATE ((int (*)(u32, u32, u32 *))0x006aecb4)       /* c_wgl_img_tpl_create(segment type, image, &tpl) */
 #define GET_RECT  ((int (*)(u32, u32, int *))0x006bbfd0)        /* widget rect (handle, 1, rect) */
+#define BAR_POST  ((int (*)(const u32 *))0x00823cf9)            /* Setup: post a private message (Thumb) */
+#define BAR_MOVE  ((int (*)(u32, u32, u32))0x008240bd)          /* Setup: move the highlight bar (menu, row, bar) */
 #define SETUP_MSG 0x00824121u                                   /* Setup's message handler (its AMB record + 0xd0) */
 #define H_SETUP   (*(volatile u32 *)0x01345120)                 /* Setup's app handle */
 #define SG        0x0134512cu                                   /* Setup globals: +0x14 language, +0x2c category list */
@@ -62,6 +64,7 @@ typedef int i32;
 #define MC_GET_HLT   0x1000301du   /* menu: highlighted row */
 #define MC_CHECK     0x10003021u   /* menu: mark row (row, 1) */
 #define MC_INSERT    0x10003030u   /* menu: insert item (row, item) */
+#define MC_GET_TOP   0x10003033u   /* menu: first visible row */
 
 // ---- menu descriptors (wgl_menu) --------------------------------------------------------------------------------
 struct item { u8 flags, p1, p2, p3; u32 r4; const void *const *cols; struct desc *sub; u32 r10; };
@@ -79,12 +82,14 @@ _Static_assert(sizeof(struct item) == 0x14, "item");
 _Static_assert(sizeof(struct desc) == 0x38, "desc");
 
 // ---- the options --------------------------------------------------------------------------------------------------
-#define NOPT  8
+#define NOPT  12
 #define NVMAX 13
+#define OPT_H10 9                  /* rows hdr10plus, dynamic_hdr */
+#define OPT_DYN 10
 #define XT_ROW 6                   /* "Extras" goes before Exit */
 #define ID_PAGE 0x1f0              /* menu ids nobody uses (Setup's run 1..0xf8, other menus from 0x5dd) */
 #define ID_OPT0 0x1f1
-enum { LIVE_NONE, LIVE_DV, LIVE_L5, LIVE_FS };
+enum { LIVE_NONE, LIVE_DV, LIVE_L5, LIVE_FS, LIVE_H10 };
 struct opt {
     const char *key;
     const u16 *label, *help;
@@ -116,6 +121,15 @@ static const struct opt O[NOPT] = {
       u"Show which parts loaded after each boot (after a restart)", 2, 0, LIVE_NONE, ONOFF },
     { "dlna_iso", u"DLNA Disc Images",
       u"Blu-ray, UHD and DVD ISO files over DLNA (after a restart)", 2, 0, LIVE_NONE, ONOFF },
+    { "smb23", u"SMB2 / SMB3 Shares",
+      u"Network menu: servers without SMB1, e.g. Windows (after a restart)", 2, 0, LIVE_NONE, ONOFF },
+    { "hdr10plus", u"HDR10+ MKV",
+      u"HDR10+ from MKV files, when the TV has it", 2, 0, LIVE_H10, ONOFF },
+    { "dynamic_hdr", u"Preferred HDR",
+      u"MKV with both Dolby Vision and HDR10+, when the TV has both", 2, 0, LIVE_H10,
+      { "dv", "hdr10plus" }, { u"Dolby Vision", u"HDR10+" }, { 0 } },
+    { "audio_edid_override", u"Audio EDID Override",
+      u"All audio formats, whatever the receiver reports (after a restart)", 2, 1, LIVE_NONE, ONOFF },
 };
 
 #include "xtext.h"
@@ -129,7 +143,7 @@ struct xhdr {
     volatile u32 status;           // +12  0 not started, 1 waiting for the Setup thread, 2 on, 3 failed
     volatile i32 err;              // +16  which step failed (negative), or 0
     volatile u32 saves, save_err;  // +20, +24
-    u8 cur[8];                     // +28  current values
+    u8 r28[8];                     // +28
     char path[96];                 // +36  options.txt
     volatile u32 inserts, msgs;    // +132, +136
     volatile u32 box;              // +140 the taller box is in
@@ -137,7 +151,9 @@ struct xhdr {
     u32 l5_pa;                     // +148 physical address of dvcm's L5 word (bdpdrv1), 0 = not on
     char ver[24];                  // +152 oppo-dv-mkv version
     u32 fs_addr;                   // +176 dvhook's forced_subs byte (liblp), 0 = not on
+    u8 cur[16];                    // +180 current values
 };
+_Static_assert(NOPT <= 16, "cur");
 _Static_assert(__builtin_offsetof(struct xhdr, inserts) == 132 && __builtin_offsetof(struct xhdr, ver) == 152 && __builtin_offsetof(struct xhdr, fs_addr) == 176, "xtmenu.sh");
 __attribute__((section(".hdr"), used)) struct xhdr X = {
     0x4e4d5458, 2, xt_init, 0, 0, 0, 0, { 0 }, "/mnt/ubi_boot/oppo-dv-mkv/options.txt" };
@@ -200,10 +216,20 @@ static void hints(u32 v58, u32 v5c, u32 v60, u32 v64)
 {
     SETVIS(GW(0x74), 2); SETVIS(GW(0x58), v58); SETVIS(GW(0x5c), v5c); SETVIS(GW(0x60), v60); SETVIS(GW(0x64), v64);
 }
+static u16 top_row(u32 h)      // first visible row (the menu fills in more than one halfword)
+{
+    u16 t[8] = { 0 };
+    DO_CMD(h, MC_GET_TOP, (u32)t, 0);
+    return t[0];
+}
+static void cat_line(void)     // 0x83f78c takes the page's first visible row off the row it is given
+{
+    LINE(GW(0x2c), 0, 0, XT_ROW + (page_h ? top_row(page_h) : 0), 0);
+}
 static void page_frame(void)   // the box around our page and the line under "Extras" (Oppo's level-0 line for its row)
 {
     SETVIS(GW(0x3c), 0);
-    LINE(GW(0x2c), 0, 0, XT_ROW, 0);
+    cat_line();
 }
 static int opt_of(u32 id) { return id >= ID_OPT0 && id < ID_OPT0 + NOPT ? (int)(id - ID_OPT0) : -1; }
 
@@ -312,6 +338,8 @@ static void apply_live(int i)
     int on = X.cur[i] == 0;
     if (O[i].live == LIVE_DV && X.dv_addr) *(volatile u8 *)X.dv_addr = on ? 0 : 1;
     if (O[i].live == LIVE_FS && X.fs_addr) *(volatile u8 *)X.fs_addr = on ? 1 : 0;
+    if (O[i].live == LIVE_H10 && X.fs_addr)                   /* both rows: struct ml hopt = fopt + 0xd3 (mp4.c) */
+        *(volatile u8 *)(X.fs_addr + 0xd3) = (X.cur[OPT_H10] ? 1 : 0) | (X.cur[OPT_DYN] ? 2 : 0);
     if (O[i].live == LIVE_L5 && X.l5_pa) {
         i32 fd = (i32)sc3(SYS_OPEN, (u32)"/dev/mem", 2, 0);
         u32 w = 0, nw = on ? 0xe2423006u : 0xe2423005u;     // sub r3, r2, #6 keeps L5; #5 is Oppo's (drops it)
@@ -422,11 +450,35 @@ static void page_row(u16 row)
 }
 static int pg_pre(u32 *c) { page_h = c[2]; styles(c[2], 1); page_values(c[2]); return 0; }
 static int pg_sel(void) { return 0; }
+// A list with more rows than are visible: Oppo's UP/DOWN layer (0x3f260 / 0x3f880) leaves the keys at its ends to the
+// menu, which wraps by itself; the bar's row (bytes 0x134756d page, 0x1347570 option list) and the row counter
+// (0x1347576, 0x1347578) are then the highlight callback's job (Oppo's: 0x841c78 page, 0x856620 option list).
+static u16 hlt_row(u32 h, u32 n, int page)
+{
+    volatile u8 *bar = (volatile u8 *)(page ? 0x0134756d : 0x01347570);
+    volatile u16 *cnt = (volatile u16 *)(page ? 0x01347576 : 0x01347578);
+    u16 row = 0, top;
+    u32 to = 0;
+    DO_CMD(h, MC_GET_HLT, (u32)&row, 0);
+    if (n <= 7 || row >= n) return row;
+    if ((*bar && row == 0) || (*bar != 6 && row == n - 1)) {
+        to = row ? 6 : 0;
+        *bar = to; *cnt = row;
+        *(volatile u8 *)0x01345128 = 1; *(volatile u8 *)0x0134756b = 1;
+        *(volatile u8 *)0x0134799f = page ? 0xd : 0xe;
+        if (page) { u32 m[4] = { 8, h, to, GW(0x28) }; BAR_POST(m); }
+        else BAR_MOVE(h, to, GW(0x28));
+    }
+    top = top_row(h);
+    if (row - top != *bar) row = *bar + top;
+    *cnt = row;
+    return row;
+}
 static int pg_hlt(u32 *c)
 {
     u16 row = 0;
     if (!F_FOCUS) {
-        DO_CMD(c[2], MC_GET_HLT, (u32)&row, 0);
+        row = hlt_row(c[2], NOPT, 1);
         page_row(row);
         REPAINT(GW(0x70), 0, 0); REPAINT(GW(0x74), 0, 0);
         return 0;
@@ -517,11 +569,12 @@ static int op_hlt(u32 *c)
         SETVIS(GW(0x58), 0); SETVIS(GW(0x5c), 0); SETVIS(GW(0x60), 0); SETVIS(GW(0x64), 2);
         SETVIS(GW(0x40), 0);
         if (i >= 0 && O[i].n > 7) SETVIS(GW(0x34), 0);
-        LINE(GW(0x2c), 0, 0, XT_ROW, 0);       // Oppo has no category-6 lines into an option list
+        cat_line();                           // Oppo has no category-6 lines into an option list
         WSHOW(GW(0x20), 0);
         F_25 = 0; F_NEXT = 0;
         return 0;
     }
+    if (i >= 0) hlt_row(c[2], O[i].n, 0);
     help(h);
     SETVIS(GW(0x58), 0); SETVIS(GW(0x5c), 0); SETVIS(GW(0x60), 0); SETVIS(GW(0x64), 2);
     REPAINT(GW(0x70), 0, 0); REPAINT(GW(0x4c), 0, 0);

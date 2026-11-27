@@ -30,6 +30,13 @@ changes the options on the player: Dolby Vision MKV and L5 at once, the others a
 for now; RU 65-0131 program family). New options: dv_mkv = off (no Dolby Vision from MKV, the player's own way),
 dv_l5 = off (no L5 to the TV, Oppo's way), setup_extras = off (no Extras page). Installing with
 oppo-dv-mkv-options.txt on the stick replaces what was set on the player; delete it from the stick to keep that.
+Since v2.3.0 (beta): servers that only speak SMB2 / SMB3 (Windows, a NAS with SMB1 switched off) can be opened in the
+player's Network menu (part of the Dolby Vision MKV fix; smb23 = off turns it off). Not tested with Windows yet.
+
+HEVC MKV files with HDR10+ play in HDR10+ on a TV that has it (hdr10plus = off: HDR10, the player's own way); for files with
+Dolby Vision too, dynamic_hdr = dv or hdr10plus chooses when the TV has both. audio_edid_override = on (off as shipped): all audio
+formats whatever the receiver reports, for a zone 2 that reports stereo; untested on a real one, and a device that cannot
+decode them gives silence or noise.
 
 Also: better subtitles (anti-aliased, thicker outline with black, grey colours for HDR/DV) and a factory menu
 shortcut (Setup > Playback Setup, cursor on Gapless Playback, press 0 0 0 0), for the player programs of every

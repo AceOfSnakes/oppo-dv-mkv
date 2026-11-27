@@ -765,23 +765,37 @@ CAVE6 void txt_dec(u8 *d, u32 base) {
  * bottom SPS_BOXY, height SPS_BOXH = 280 on the 1920x1080 subtitle plane) holds 3 lines of the larger font sizes; the
  * drawer skips lines outside it, so the top line of a 4-line subtitle (long lines wrapped) was lost. The box is made
  * TALL_BOX high, growing upwards (lines stay bottom-aligned). A line that asked for the top is drawn in a box at the
- * top of the plane, its lines from the top of the box (vertical alignment SPS_VALIGN 1 = top). */
+ * top of the plane, its lines from the top of the box (vertical alignment SPS_VALIGN 1 = top). The box starts as far
+ * from the top as the bottom box ends from the bottom, so the menu's Subtitle Shift moves both the same way in or out.
+ * A line or segment with tags got its tags' style only, without the menu style (the outline): put it back (SPS_STY
+ * -> x_fe style bits: 1 regular, 2 italic, 4 bold, 8 underline, 0x20 and up edges). */
 #define VA_RENDER  0x5847b0u   /* mrSpsRenderTextOnSurf */
 #define SPS_BOXY   0x9d38
 #define SPS_BOXH   0x9d40
 #define SPS_VALIGN 0x9d54
-#define TOP_MARGIN 60
 #define TALL_BOX   600
+#define VA_STYLE   0x584008u   /* (u8, u8, u8 of the menu's font style) -> x_fe style of plain text */
+#define SPS_STY    0x9d28
+typedef u32 (*style_t)(u32 a, u32 b, u32 c);
+struct seg { u32 text, len, sty; };
+struct ln { u32 text, len, sty, nseg; struct seg *seg; };
 typedef u32 (*rend_t)(u8 *d, u32 surf, void *info);
 CAVE6 u32 txt_rend(u8 *d, u32 surf, void *info, u32 base) {
     volatile struct st *s = ST(base);
     rend_t f = (rend_t)(base + VA_RENDER);
     u32 y = *(u32 *)(d + SPS_BOXY), h = *(u32 *)(d + SPS_BOXH), va = *(u32 *)(d + SPS_VALIGN);
     if (y > 1080 || h > 1080) return f(d, surf, info);      /* not the layout we know */
+    struct { struct ln *l; u32 n; } *li = info;
+    u32 ps = ((style_t)(base + VA_STYLE))(d[SPS_STY], d[SPS_STY + 1], d[SPS_STY + 2]) & ~0xfu;
+    for (u32 i = 0; li->l && i < li->n && i < 8; i++) {
+        struct ln *l = &li->l[i];
+        if (l->sty & 0xe) l->sty |= ps;
+        for (u32 k = 0; l->nseg > 1 && l->seg && k < l->nseg; k++) if (l->seg[k].sty & 0xe) l->seg[k].sty |= ps;
+    }
     u32 nh = h < TALL_BOX ? TALL_BOX : h;
     if (nh > y) nh = y;
     *(u32 *)(d + SPS_BOXH) = nh;
-    if (s->top) { s->thits[1]++; *(u32 *)(d + SPS_BOXY) = nh + TOP_MARGIN; *(u32 *)(d + SPS_VALIGN) = 1; }
+    if (s->top) { s->thits[1]++; *(u32 *)(d + SPS_BOXY) = nh + (1080 - y); *(u32 *)(d + SPS_VALIGN) = 1; }
     u32 r = f(d, surf, info);
     *(u32 *)(d + SPS_BOXY) = y; *(u32 *)(d + SPS_BOXH) = h; *(u32 *)(d + SPS_VALIGN) = va;
     return r;
@@ -902,16 +916,18 @@ struct ml {
     u8 na, ns, sel, rd;    /* last scan: audio, subtitle tracks; 1 = chose; 2 = read, 3 = read failed */
     u8 arm;          /* 1: the next subtitle switch-on is replaced; then 0x80 | the number chosen (0 = off / stock) */
     u8 fopt;         /* option forced_subs (Setup > Extras, dvhook.sh forced on|off): forced subtitles only */
-    u8 nst, rsv;
+    u8 nst;
+    u8 h10;          /* bit 0: the file's video has HDR10+ data; bit 1: it plays in HDR10+, not in Dolby Vision */
     u32 fn_sub, fn_osd, tab;   /* player program: a_cfg_get_subtitlelanguage, a_cfg_get_osdlanguage (Thumb), the
                                   10-byte ISO 639 table; set by dvhook.sh on after checking them, 0 = not this program */
     u8 snum[32];     /* track number of subtitle record i (mkv_keep) */
-    struct { u8 num, fl; u16 key; } st[36];   /* the scan's subtitle tracks: fl 1 forced, 2 default */
+    struct { u8 num, fl; u16 key; } st[36];   /* the scan's subtitle tracks: fl 1 forced, 2 default, codec << 4 */
     u32 atmos[4];    /* track numbers (< 128) of TrueHD tracks with Atmos (thd_scan) */
-    u32 proxy;       /* the MKV proxy of the file playing (mkv_start), 0 once it is stopped or destroyed (mkv_dtor) */
+    u32 proxy;       /* (+0xf8) the MKV proxy of the file playing (mkv_start), 0 once it is stopped or destroyed (mkv_dtor) */
+    u8 hopt;         /* (+0xfc) options: bit 0 hdr10plus = off, bit 1 dynamic_hdr = hdr10plus (dvhook.sh h10, Setup > Extras) */
 };
 #define ML(base) ((volatile struct ml *)((base) + ML_VA))
-_Static_assert(sizeof(struct ml) <= 0x100 && __builtin_offsetof(struct ml, fopt) == 0x29 && __builtin_offsetof(struct ml, fn_sub) == 0x2c, "struct ml: fits before dvhook's state; mkinstall.py");
+_Static_assert(sizeof(struct ml) <= 0x100 && __builtin_offsetof(struct ml, fopt) == 0x29 && __builtin_offsetof(struct ml, hopt) == 0xfc && __builtin_offsetof(struct ml, fn_sub) == 0x2c, "struct ml: fits before dvhook's state; mkinstall.py");
 struct mt { u8 num, type, def, forced; u16 key; u8 thd, rsv; };
 
 /* EBML element header at b[*i] (n bytes): ID with its marker, size; 0 = bad / unknown size / past the end */
@@ -934,6 +950,15 @@ static CAVE8 u32 ebml(const u8 *b, u32 n, u32 *i, u32 *id, u32 *sz) {
     return *i + *sz <= n;
 }
 static CAVE7 u32 euint(const u8 *v, u32 sz) { u32 x = 0; for (u32 j = 0; j < sz; j++) x = x << 8 | v[j]; return sz > 4 ? 0xffffffff : x; }
+/* CodecID: 1 A_TRUEHD, 2 A_EAC3; 3 V_MPEGH (HEVC); subtitles 4 SRT, 5 ASS / SSA, 6 WebVTT, 7 PGS, 8 VobSub; else 0 */
+static __attribute__((section(".ddp"), noinline)) u32 codec(const u8 *v, u32 sz) {
+    if (sz < 5 || v[1] != '_') return 0;
+    if (v[0] == 'V') return sz >= 15 && v[2] == 'M' && v[6] == 'H' ? 3 : 0;
+    if (v[0] == 'A') return sz >= 8 && v[2] == 'T' && v[3] == 'R' && v[7] == 'D' ? 1 : sz >= 6 && v[2] == 'E' && v[3] == 'A' ? 2 : 0;
+    u32 c = v[2];
+    if (c == 'T' && sz >= 10) c = v[7];                      /* S_TEXT/... */
+    return c == 'U' ? 4 : c == 'A' || c == 'S' ? 5 : c == 'W' ? 6 : c == 'H' && sz >= 10 && v[7] == 'P' ? 7 : c == 'V' ? 8 : 0;
+}
 static CAVE7 void trk(const u8 *b, u32 e, u32 i, struct mt *t, u32 base) {
     u32 id, sz, kl = 'e' << 8 | 'n', ki = 0;   /* Matroska defaults: Language "eng", FlagDefault 1, FlagForced 0 */
     t->num = 0; t->type = 0; t->def = 1; t->forced = 0; t->thd = 0;
@@ -942,7 +967,7 @@ static CAVE7 void trk(const u8 *b, u32 e, u32 i, struct mt *t, u32 base) {
         if (id == 0xd7) { u32 x = euint(v, sz); t->num = x < 128 ? x : 0; }
         else if (id == 0x83) t->type = euint(v, sz);
         else if (id == 0x88) t->def = euint(v, sz) != 0;
-        else if (id == 0x86 && sz >= 8 && v[0] == 'A' && v[2] == 'T' && v[3] == 'R' && v[7] == 'D') t->thd = 1;   /* A_TRUEHD */
+        else if (id == 0x86) t->thd = codec(v, sz);
         else if (id == 0x55aa) t->forced = euint(v, sz) != 0;
         else if (id == 0x22b59 && sz >= 3) kl = key3(v, base);
         else if (id == 0x22b59d) ki = ietf(v, sz, base);
@@ -956,8 +981,9 @@ typedef u32 (*mkrd_t)(void *p, u8 *buf, u32 len);
  * The info bar names the audio by its PB code; TrueHD is 0x1a ("Dolby TrueHD") and the player has no Atmos name.
  * thd_scan (from mkv_scan, only when the file has TrueHD) walks the Segment from the end of Tracks to the first
  * Cluster, steps through up to TH_ELEMS of its blocks and looks at the first major sync of each TrueHD track: Atmos = 4 substreams
- * and substream_info bit 7 (the 16-channel presentation). mkv_thd then gives such a track code 8 (SDDS, which never
- * occurs on this player), whose info-bar text dvhook.sh points at "Dolby Atmos". */
+ * and substream_info bit 7 (the 16-channel presentation). A Dolby Digital Plus track is Atmos when its first syncframe
+ * has the extension flag for it in addbsi (ddp_joc). mkv_thd then gives such a track code 8 (SDDS, which never occurs
+ * on this player), whose text dvhook.sh points at our buffers; atmos_names writes them for each file. */
 #define TH_ELEMS 200     /* cluster elements looked at */
 static CAVE5 u32 rdat(u8 *p, u64 pos, u8 *b, u32 n, u32 base) {
     *(volatile u64 *)(p + K_POS) = pos; *(volatile u32 *)(p + K_BUFLEFT) = 0;
@@ -978,13 +1004,131 @@ static CAVE5 u32 hdr(const u8 *b, u32 n, u32 *id, u64 *sz) {
     }
     return i;
 }
+/* E-AC-3 syncframe at d (n bytes): the bit stream information up to addbsi; 1 = extension type A (JOC: Dolby Atmos) */
+#define CAVE9 __attribute__((section(".ddp"), noinline))   /* in vMPCTestPlayVcdThr (link.ld) */
+struct br { const u8 *d; u32 n, p; };
+static CAVE9 u32 dgb(struct br *b, u32 k) {
+    u32 v = 0;
+    while (k--) { u32 i = b->p >> 3; v = v << 1 | (i < b->n ? b->d[i] >> (7 - (b->p & 7)) & 1 : 0); b->p++; }
+    return v;
+}
+static CAVE9 void dopt(struct br *b, u32 k) { if (dgb(b, 1)) b->p += k; }   /* a flag, and k bits when it is set */
+static CAVE9 u32 ddp_joc(const u8 *d, u32 n) {
+    if (n < 16 || d[0] != 0x0b || d[1] != 0x77) return 0;
+    struct br b = { d, n, 16 };
+    u32 typ = dgb(&b, 2); b.p += 14;                          /* strmtyp; substreamid, frmsiz */
+    u32 fscod = dgb(&b, 2), blk = 3;
+    if (fscod == 3) b.p += 2; else blk = dgb(&b, 2);          /* fscod2 / numblkscod */
+    u32 ac = dgb(&b, 3), lfe = dgb(&b, 1), id = dgb(&b, 5);
+    if (id < 11 || id > 16) return 0;
+    for (u32 k = 0; k < (ac ? 1 : 2); k++) { b.p += 5; dopt(&b, 8); }                         /* dialnorm, compr */
+    if (typ == 1) dopt(&b, 16);                               /* chanmap */
+    if (dgb(&b, 1)) {                                         /* mixing metadata */
+        if (ac > 2) b.p += 2;
+        if (ac & 1 && ac > 2) b.p += 6;
+        if (ac & 4) b.p += 6;
+        if (lfe) dopt(&b, 5);
+        if (typ == 0) {
+            dopt(&b, 6); if (!ac) dopt(&b, 6);
+            dopt(&b, 6);
+            u32 mix = dgb(&b, 2);
+            if (mix == 1) b.p += 5; else if (mix == 2) b.p += 12; else if (mix == 3) { u32 l = dgb(&b, 5); b.p += 8 * (l + 2); }
+            if (ac < 2) { dopt(&b, 14); if (!ac) dopt(&b, 14); }
+            if (dgb(&b, 1)) {                                 /* frame mixing configuration */
+                if (!blk) b.p += 5; else for (u32 k = 0; k < (blk == 3 ? 6 : blk + 1); k++) dopt(&b, 5);
+            }
+        }
+    }
+    if (dgb(&b, 1)) {                                         /* informational metadata */
+        b.p += 5;
+        if (ac == 2) b.p += 4; else if (ac >= 6) b.p += 2;
+        dopt(&b, 8); if (!ac) dopt(&b, 8);
+        if (fscod < 3) b.p += 1;
+    }
+    if (typ == 0 && blk != 3) b.p += 1;                      /* convsync */
+    if (typ == 2) { u32 bid = blk == 3 ? 1 : dgb(&b, 1); if (bid) b.p += 6; }
+    if (!dgb(&b, 1)) return 0;                                /* addbsi */
+    u32 l = dgb(&b, 6); b.p += 7;
+    return l > 0 && b.p < n * 8 && dgb(&b, 1);
+}
+/* the name of audio code 8 for this file: w = 1 TrueHD, 2 Dolby Digital Plus, 3 both kinds of Atmos track */
+#define VA_NLONG  0x757cd8u   /* ASCII, 25 bytes */
+#define VA_NSHORT 0x757e50u   /* ASCII for the short fields (front display, IP control), 16 bytes */
+#define VA_NWIDE  0x757fc8u   /* the long name in UTF-16, 50 bytes */
+static CAVE9 void atmos_names(u32 w, u32 base) {
+    static const char __attribute__((section(".ddp.rodata"))) T[] = "Dolby TrueHD Atmos\0TrueHD Atmos\0Dolby DD+ Atmos\0DD+ Atmos\0Dolby Atmos\0Dolby Atmos";
+    const char *t = T + base;                                /* link-time address -> where liblp is */
+    for (u32 k = (w - 1) * 2; k; k--) while (*t++) ;
+    volatile char *l = (volatile char *)(base + VA_NLONG), *s = (volatile char *)(base + VA_NSHORT);
+    volatile u16 *u = (volatile u16 *)(base + VA_NWIDE);
+    do { *l++ = *t; *u++ = (u8)*t; } while (*t++);
+    do *s++ = *t; while (*t++);
+}
+/* ---- HDR10+ (SMPTE ST 2094-40) in HEVC MKV ----
+ * The driver reads the HDR10+ SEI of every frame and sends it to the TV (VSIF) when the output is HDR10+, and the player
+ * program chooses that by itself when the TV's EDID has HDR10+ - but it must be told that the source is HDR10+, and the
+ * MKV code says HDR10. h10_blk looks at the NAL units in front of the first slice of the first video block. */
+#define CAVE10 __attribute__((section(".h10"), noinline))   /* in vMPCTestPlayMpgThr (link.ld) */
+static CAVE5 u32 rdat(u8 *p, u64 pos, u8 *b, u32 n, u32 base);
+static CAVE10 u32 h10_blk(u8 *p, u64 pos, u64 n, u32 base) {
+    u8 b[96];
+    for (u32 k = 0; k < 32 && n > 8; k++) {
+        u32 g = n < sizeof b ? (u32)n : sizeof b;
+        if (rdat(p, pos, b, g, base)) return 0;
+        u32 l = be32(b), t = b[4] >> 1 & 63, e = l + 4 < g ? l + 4 : g;
+        if (t < 32 || l < 2 || l > n) return 0;              /* the picture, or not 4-byte lengths */
+        if (t == 39) for (u32 i = 6; i + 8 < e; ) {          /* SEI messages */
+            u32 ty = 0, sz = 0;
+            while (i < e && b[i] == 0xff) { ty += 255; i++; }
+            if (i < e) ty += b[i++];
+            while (i < e && b[i] == 0xff) { sz += 255; i++; }
+            if (i < e) sz += b[i++];
+            if (ty == 4 && sz >= 8 && i + 6 <= e && b[i] == 0xb5 && !b[i + 1] && b[i + 2] == 0x3c && !b[i + 3] && b[i + 4] == 1 && b[i + 5] == 4) return 1;
+            i += sz;
+        }
+        pos += 4 + l; n -= 4 + l;
+    }
+    return 0;
+}
+/* eMPCScomMapVideoHdrType, HDR10 source: 2, or 5 (HDR10+) while such an MKV plays */
+extern u32 h_scom, h_hand;                                   /* shims.S, written by dvhook.sh (0 = not known) */
+typedef int (*sfmt_t)(u32 h, void *fmt);
+/* what the TV can: bit 0 HDR10+, bit 1 Dolby Vision (the player program's copy of the EDID, byte 0x94); 3 = not known */
+static CAVE10 u32 h10_tv(u32 base) {
+    u32 f[0x2f0 / 4], s = *(volatile u32 *)((u32)&h_scom + base), h = *(volatile u32 *)((u32)&h_hand + base);
+    if (!s || !h) return 3;
+    for (u32 k = 0; k < 0x2f0 / 4; k++) f[k] = 0;
+    ((sfmt_t)s)(*(u32 *)h, f);
+    u32 b = ((u8 *)f)[0x94];
+    return (b >> 4 & 1) | (b >> 1 & 1) << 1;
+}
+CAVE10 u32 h10_map(u32 base) { volatile struct ml *m = ML(base); return m->h10 & 1 && !(m->hopt & 1) && m->proxy ? 5 : 2; }
+/* Before dvhook's dv_decide (mrMkvSetFileInf -> mrSetMediaInfo): a file with Dolby Vision AND HDR10+ on an HDR10 base
+ * layer (profile 8.1 / 8.6 or 7). HDR10+ is used when the TV has it and the option prefers it, or the TV has no Dolby
+ * Vision: the Dolby Vision record is forgotten, as with dv_mkv = off. */
+CAVE10 void h10_pick(u32 base) {
+    volatile struct ml *m = ML(base); volatile u8 *dv = (volatile u8 *)(base + 0x757e00);   /* dvhook.c struct st: +4 have, +8 rec */
+    if (!(m->h10 & 1) || m->hopt & 1 || !dv[4]) return;
+    u32 prof = dv[8 + 2] >> 1, comp = dv[8 + 4] >> 4, tv;
+    if (!(prof == 7 || (prof == 8 && (comp == 1 || comp == 6)))) return;
+    tv = h10_tv(base);
+    if (!(tv & 1) || (tv & 2 && !(m->hopt & 2))) return;
+    dv[4] = 0; m->h10 |= 2;
+}
 static CAVE5 void thd_blk(const u8 *d, u32 n, u32 *thd, volatile struct ml *m) {   /* a (Simple)Block's data */
     if (n < 4 || (d[0] & 0xf0) != 0x80) return;   /* track number as a 1-byte vint (< 128) */
     u32 num = d[0] & 0x7f, w = num >> 5, bit = 1u << (num & 31);
+    if (thd[4 + w] & bit) {
+        thd[4 + w] &= ~bit;
+        u32 o = 4;                                           /* a laced block (mkvmerge packs 8 frames) has sizes first */
+        while (o < 4 + 32 && o + 1 < n && !(d[o] == 0x0b && d[o + 1] == 0x77)) o++;
+        if (ddp_joc(d + o, n - o)) { m->atmos[w] |= bit; thd[8] |= 2; }
+        return;
+    }
     if (!(thd[w] & bit)) return;
     for (u32 k = 4; k + 18 <= n && k < 4 + 64; k++)
         if (d[k] == 0xf8 && d[k + 1] == 0x72 && d[k + 2] == 0x6f && d[k + 3] == 0xba && d[k + 8] == 0xb7 && d[k + 9] == 0x52) {
-            if (d[k + 16] >> 4 == 4 && d[k + 17] & 0x80) m->atmos[w] |= bit;
+            if (d[k + 16] >> 4 == 4 && d[k + 17] & 0x80) { m->atmos[w] |= bit; thd[8] |= 1; }
             thd[w] &= ~bit;
             return;
         }
@@ -1002,9 +1146,13 @@ static CAVE5 void thd_scan(u8 *p, u64 pos, u32 *thd, u32 base) {
      * keyframe at the start can be megabytes); a BlockGroup is entered for its Block */
     u8 d[96]; u64 end = sz == ~(u64)0 ? ~(u64)0 : pos + hl + sz;
     pos += hl;
-    for (u32 e = 0; e < TH_ELEMS && pos < end && (thd[0] | thd[1] | thd[2] | thd[3]); e++) {
+    for (u32 e = 0; e < TH_ELEMS && pos < end && (thd[0] | thd[1] | thd[2] | thd[3] | thd[4] | thd[5] | thd[6] | thd[7] | thd[9]); e++) {
         if (rdat(p, pos, h, 16, base) || !(hl = hdr(h, 16, &id, &sz)) || sz == ~(u64)0) return;
         if (id == 0xa0) { pos += hl; continue; }   /* into the BlockGroup */
+        if ((id == 0xa3 || id == 0xa1) && thd[9] && !rdat(p, pos + hl, d, 4, base) && d[0] == (0x80 | thd[9])) {
+            thd[9] = 0;
+            if (h10_blk(p, pos + hl + 4, sz - 4, base)) m->h10 |= 1;
+        }
         if ((id == 0xa3 || id == 0xa1) && !rdat(p, pos + hl, d, sz < sizeof d ? (u32)sz : sizeof d, base))
             thd_blk(d, sz < sizeof d ? (u32)sz : sizeof d, thd, m);
         pos += hl + sz;
@@ -1015,28 +1163,31 @@ CAVE7 void mkv_dtor(u32 x, u32 base) { volatile struct ml *m = ML(base); if (m->
 /* CLpMpcWrapper::vMsgAElmStrmCallback, after mrMapPBACodeMode (the audio the decoder reports; the long-press info
  * panel): decoder type 6 (MLP / TrueHD) gives "MLP". While an MKV plays on this wrapper, its TrueHD track gets the
  * same name as in the menus (mkv_thd: Dolby TrueHD, or Dolby Atmos). Disc MLP (DVD-Audio) keeps its name. */
-CAVE7 u32 mkv_thd(u8 *p, u32 idx, u32 base);
+CAVE7 u32 mkv_thd(u8 *p, u32 idx, u32 base, u32 code);
 #define X_WRAPPER 0x80
 #define X_MKPARSER  0x114
 #define X_AUD       0x1c28
 CAVE7 void mkv_aelm(u32 w, u32 *code, u32 dt, u32 base) {
     volatile struct ml *m = ML(base);
     u8 *x = (u8 *)m->proxy;
-    if (dt != 6 || *code != 0xb || !x || *(u32 *)(x + X_WRAPPER) != w) return;
+    u32 c = *code, dd = c == 6 || c == 7 || c == 0x14 || c == 0x18;   /* dd: Dolby Digital Plus */
+    if (!(dt == 6 && c == 0xb) && !dd) return;
+    if (!x || *(u32 *)(x + X_WRAPPER) != w) return;
     u8 *p = *(u8 **)(x + X_MKPARSER);
-    if ((u32)p == m->parser) *code = mkv_thd(p, x[X_AUD], base);
+    if ((u32)p == m->parser) *code = mkv_thd(p, x[X_AUD], base, dd ? c : 0x1a);
 }
-/* CLpMkvParser::eMapPBAudioCodec, A_TRUEHD (0x3bac6c, r5 = parser, r6 = audio record): 0x1a, or 8 for Atmos */
-CAVE7 u32 mkv_thd(u8 *p, u32 idx, u32 base) {
+/* CLpMkvParser::eMapPBAudioCodec, A_TRUEHD (0x3bac6c) and A_EAC3 (0x3bac44; r5 = parser, r6 = audio record): the
+ * code (0x1a, 6), or 8 for Atmos */
+CAVE7 u32 mkv_thd(u8 *p, u32 idx, u32 base, u32 code) {
     volatile struct ml *m = ML(base);
-    if ((u32)p != m->parser || idx >= 10 || !m->fn_sub) return 0x1a;   /* fn_sub 0: not our player program, code 8 is "SDDS" there */
+    if ((u32)p != m->parser || idx >= 10 || !m->fn_sub) return code;   /* fn_sub 0: not our player program, code 8 is "SDDS" there */
     u32 num = *(u32 *)(*(u8 **)(p + K_TRK) + 400 + idx * 0xa0 + 0x20);
-    return num < 128 && m->atmos[num >> 5] >> (num & 31) & 1 ? 8 : 0x1a;
+    return num < 128 && m->atmos[num >> 5] >> (num & 31) & 1 ? 8 : code;
 }
 
 CAVE8 void mkv_scan(u8 *p, u32 lo, u32 hi, u32 base) {
     volatile struct ml *m = ML(base); volatile struct st *s = ST(base);
-    m->parser = 0; m->sel = 0; m->rd = 0; m->nst = 0; m->hits[0]++;
+    m->parser = 0; m->sel = 0; m->rd = 0; m->nst = 0; m->h10 = 0; m->hits[0]++;
     for (u32 j = 0; j < 4; j++) { m->skip[j] = 0; m->atmos[j] = 0; }
     for (u32 j = 0; j < 32; j++) m->snum[j] = 0;
     if (hi || !lo || lo > MKMAX) return;
@@ -1051,7 +1202,7 @@ CAVE8 void mkv_scan(u8 *p, u32 lo, u32 hi, u32 base) {
             trk(b, i + sz, i, &t[n], base);
             if (t[n].type == 2) na++; else if (t[n].type == 0x11) ns++;
             if (t[n].type == 0x11 && t[n].num && m->nst < 36) {
-                u32 q = m->nst++; m->st[q].num = t[n].num; m->st[q].fl = t[n].forced | t[n].def << 1; m->st[q].key = t[n].key;
+                u32 q = m->nst++; m->st[q].num = t[n].num; m->st[q].fl = t[n].forced | t[n].def << 1 | t[n].thd << 4; m->st[q].key = t[n].key;
             }
             n++;
         }
@@ -1060,10 +1211,13 @@ CAVE8 void mkv_scan(u8 *p, u32 lo, u32 hi, u32 base) {
     ((free_t)(base + VA_FREE))(b);
     m->rd = r ? 3 : 2;
     if (r) return;
-    u32 thd[4] = { 0, 0, 0, 0 };
-    for (u32 k = 0; k < n; k++) if (t[k].type == 2 && t[k].thd && t[k].num) thd[t[k].num >> 5] |= 1u << (t[k].num & 31);
-    if (thd[0] | thd[1] | thd[2] | thd[3]) {
+    u32 thd[10], any = 0;                                     /* TrueHD tracks, Dolby Digital Plus tracks; kinds of Atmos found */
+    for (u32 k = 0; k < 10; k++) thd[k] = 0;
+    for (u32 k = n; k--; ) if (t[k].type == 1 && t[k].thd == 3 && t[k].num) { any = 1; thd[9] = t[k].num; }   /* first HEVC track */
+    for (u32 k = 0; k < n; k++) if (t[k].type == 2 && (t[k].thd == 1 || t[k].thd == 2) && t[k].num) { any = 1; thd[(t[k].num >> 5) + (t[k].thd == 2 ? 4 : 0)] |= 1u << (t[k].num & 31); }
+    if (any) {
         thd_scan(p, pos + lo, thd, base);
+        if (thd[8]) atmos_names(thd[8], base);
         *(volatile u64 *)(p + K_POS) = pos; *(volatile u32 *)(p + K_BUFLEFT) = 0;
     }
     m->na = na; m->ns = ns; m->parser = (u32)p;
@@ -1150,4 +1304,33 @@ CAVE8 void mkv_chg(u8 *x, u8 *prm, u32 base) {
     if (best) prm[4] = best;
     else if (m->fopt) { prm[4] = 0; prm[5] = 0; }
     m->arm = 0x80 | best;
+}
+
+/* The subtitle menu's rows ("2/5 English", one function of the player program): while an MKV plays, the format and
+ * "Forced" (the player's own translated text) behind the language. row = 1-based number, w = the row's text (180). */
+CAVE6 void sub_row(u32 row, u16 *w, u32 base, u32 site) {
+    volatile struct ml *m = ML(base);
+    u32 n = 0;
+    while (n < 120 && w[n]) n++;
+    w[n++] = ' '; w[n] = 0;                                  /* what the stock code does here */
+    if (!m->proxy || !row || row > 32) return;
+    u8 *p = *(u8 **)(m->proxy + X_MKPARSER);
+    if ((u32)p != m->parser || !m->parser || row > (*(u8 **)(p + K_TRK))[0x36]) return;
+    for (u32 q = 0; q < m->nst; q++) if (m->st[q].num == m->snum[row - 1]) {
+        u32 f = m->st[q].fl;
+        static const char __attribute__((section(".subtext.rodata"))) F[] = "SRT\0ASS\0VTT\0PGS\0VobSub";
+        u32 c = f >> 4;
+        if (c >= 4 && c <= 8) {
+            const char *t = F + base + (c - 4) * 4;
+            while (*t) w[n++] = *t++;
+            w[n++] = ' ';
+        }
+        if (f & 1) {                                         /* osdmsg string 1058, in the menu language */
+            u8 *lang = *(u8 **)site; u16 **tab = *(u16 ***)(site + 4);
+            const u16 *t = tab[1058 * 12 + *lang];
+            for (u32 k = 0; t && t[k] && k < 24; k++) w[n++] = t[k];
+        }
+        w[n] = 0;
+        return;
+    }
 }

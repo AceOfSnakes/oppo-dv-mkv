@@ -60,6 +60,29 @@ boot_message = on
 #   jailbreak's ISO player (RU and USA jailbreak, jb_overlay). off = the player's own DLNA playback only.
 dlna_iso = on
 #
+# hdr10plus = on | off
+#   HDR10+ from HEVC MKV files that have it, when the TV reports HDR10+ support and HDR Setting is Auto. Other TVs get
+#   HDR10 as before. off = HDR10 (the player's own way). From Setup > Extras: for the next file.
+hdr10plus = on
+#
+# dynamic_hdr = dv | hdr10plus
+#   MKV files with both Dolby Vision (profile 7 or 8 with an HDR10 base) and HDR10+: which one, when the TV has both. A TV
+#   with only one of them gets that one. From Setup > Extras ("Preferred HDR"): for the next file.
+dynamic_hdr = dv
+#
+# audio_edid_override = on | off
+#   on = the player takes the TV or receiver on its main HDMI output for one that plays every audio format (7.1 PCM up to
+#   192 kHz, Dolby Digital, DD+ and TrueHD with Atmos, DTS, DTS-HD, DTS:X), whatever it reports. All or nothing. For a receiver
+#   that reports the stereo of a TV or projector (e.g. zone 2). With a device that cannot decode them: silence or noise.
+#   Needs the Dolby Vision MKV fix. From Setup > Extras: after a restart.
+audio_edid_override = off
+#
+# smb23 = on | off
+#   Network menu: servers that only speak SMB2 or SMB3 (Windows 10/11, NAS with SMB1 switched off) are listed and can be
+#   opened and played from. Servers the player can use on its own (SMB1) are used as before. Needs the Dolby Vision MKV
+#   fix. off = the player's own network code only.
+smb23 = on
+#
 # setup_extras = on | off
 #   The "Extras" page in the player's Setup menu (between Network Setup and Exit) to change these options on the
 #   player. off = Oppo's Setup menu as it is. RU 65-0131 player program and its jailbreak copies only.

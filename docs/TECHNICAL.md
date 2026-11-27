@@ -296,7 +296,7 @@ in `src/liblp/mp4/shims.S`, sites in `src/liblp/mkinstall.py`.
 | 0x58a0f0 `bl mrSpsDecStringByFmtSRT` | | `m_srt` → `txt_srt`: `mp4_srt` (tx3g sample), `tx3g_styl` (style boxes → `<b> <i> <u>`, rewritten in place into the sample, whose `styl` box leaves room), `txt_dec` |
 | 0x58a0fc `bl mrSpsDecStringByFmtASS` | | `m_ass` → `txt_dec` |
 | `txt_dec` | | `txt_fix` (keep `<b> <i> <u>` in lower case, `<br>` → LF, drop other `<tags>`; `{\...}`: `\i \b \u` 0/1 → tags, `\an7-9` / SSA `\a5-7` → top, rest dropped; never longer than the input), then `txt_wrap` (balanced lines at spaces; width 2 for East Asian wide characters; limit = 2 × box width / font size + 2 = 49 at 1520 / 66, or `dvhook.sh wrap N`) |
-| 0x57fdfc `bl mrSpsRenderTextOnSurf` | | `m_rend` → `txt_rend`: box height (decoder +0x9d40, 280) at least 600, growing upwards (bottom +0x9d38 kept); a top line: bottom = height + 60, vertical alignment (+0x9d54) 1 = top (3 = bottom) |
+| 0x57fdfc `bl mrSpsRenderTextOnSurf` | | `m_rend` → `txt_rend`: box height (decoder +0x9d40, 280) at least 600, growing upwards (bottom +0x9d38 kept); a top line: bottom = height + (1080 - the bottom box's end), so Subtitle Shift applies in reverse, vertical alignment (+0x9d54) 1 = top (3 = bottom). Tagged lines and segments have only their tags' style (2 / 4 / 8): the menu's plain-text style from 0x584008 (edges, 0x20 and up) is OR-ed in |
 | 0x584e18 `bls` | `{...}` deleted | `b`: not deleted (`txt_fix` handles `{\...}`; literal braces stay) |
 | 0x583b48, 0x583ba4 `mov r1, #0x7c` (pipe) | a pipe is a line break | `#0xff` (never in UTF-8) |
 | 0x584f0c `cmp ip, #200` | lines over 200 bytes rejected | `#1000` |
@@ -362,6 +362,15 @@ first Cluster (element headers only) and through its children by position (at mo
 reading 96 bytes of each SimpleBlock / Block of a TrueHD track: the first major sync (`F8 72 6F BA`, signature
 `B7 52` at +8) gives the number of substreams (+16, high nibble) and substream_info (+17); 4 substreams and bit 7
 (16-channel presentation) = Atmos, kept as a bit per track number. The parser's read position is restored afterwards.
+
+**v2.3.0.** The same walk looks at `A_EAC3` tracks: `ddp_joc` (section `.ddp` in `vMPCTestPlayVcdThr` 0x52d25c, 0x41c bytes)
+reads the first syncframe's bit stream information up to `addbsi`; its extension type A flag = JOC = Atmos (laced blocks: the
+frame is searched behind the lace sizes). Code 8 for them too, from 0x3bac44 `mov r0, #6`. Its name is in our memory (ASCII
+0x757cd8 long, 0x757e50 short for the front display and IP control, UTF-16 0x757fc8) and `atmos_names` sets it for each
+file. 0x3c0894 `strbeq` (three, no Language element: language left empty) -> `bleq k_alang`: "eng".
+Subtitle menu rows: player program 0xa93b88 (RU; one address per program in `ROWS`, 22 bytes and the string table literal
+checked) where a row's text gets its final " ": jump to `r_row` -> `sub_row`, which appends the CodecID's format and osdmsg
+string 1058 ("Forced", translated) while an MKV plays.
 
 The start choice is the player program's, not liblp's: the stream setup leaves subtitles off (0xdf answer 0), then
 the program calls `mrChangeSpStNo` twice (number 0 off, then a number on). With Auto it always takes number 1, the
@@ -1321,6 +1330,70 @@ category texts into rows 0..6 (its row 6 is Exit, string 1481), so every highlig
 puts back row 6 (Extras) and row 7 (string 1481) and refreshes the page and option-list texts (v2.2.0). The fonts
 for Chinese, Japanese and Russian menus are loaded at boot (Oppo asks for a restart); every text was checked on the
 TV in those fonts.
+
+## Part 9: SMB2 / SMB3 shares (`smbbr`, `smbbr.sh`, v2.3.0)
+
+**Stock.** The kernel's `cifs` (3.10.26, built in) knows `vers=1.0` only: an SMB2 server answers -EOPNOTSUPP (95), `vers=2.0`
+and up are -EINVAL. The player program runs shell commands through its `ipcd` daemon for everything else (RU 65-0131,
+`smb.c`, 0x6ef000-0x6f4500): `nmblookup \*`, `smbtree -b -D`, `nmblookup -A IP...` and `nmblookup GROUP` to find servers,
+`net rpc share list -S IP -U 'dom/user%pass' -l` to log in, `mount -t cifs '//IP/SHARE' '/mnt/cifs1' -o ro,...,noserverino,
+rsize=49152` (up to 4 times), `umount.cifs -l`, then `rm -rf` of the mount directory. After a mount it reads /proc/mounts and only
+looks for the directory (`" " + path`), not the type. Output that contains `: NT_STATUS_LOGON_FAILURE` (login) or `: Permission
+denied` (mount) opens the login box. Commands by name (`[m]ount`, `[n]et rpc`, ...) are killed after 30 / 240 s.
+
+**`smbbr.sh on`** (first thing in `dvmkv.sh`, no player program code): a tmpfs on `/tmp/smbbr` (a bind mount's source cannot be
+in the rootfs, EINVAL), the real `net`, `nmblookup`, `umount.cifs`, `mount` bound to `/tmp/smbbr/real/`, then `smbbr` bound
+over all four, `mount` last. `mount -V` must answer the same as before, or everything is undone. `-n`: no /etc/mtab.
+
+**`smbbr`** (`src/smb`, static ARM, musl) acts by the name it is called with, and starts the real program unless the command line
+is one of those above:
+
+- `nmblookup *`: real answer + servers found by a TCP 445 scan of the player's own network (/24 at most, 0.9 s). Name and
+  group come from the NTLM challenge of an SMB2 session setup (no account needed). `-A IP` and `GROUP` answer from that scan for
+  servers without NetBIOS.
+- `net rpc share list`: real one first; when it fails, SMB2/3 session, `NetrShareEnum` level 1, printed in the same format.
+- `mount -t cifs`: real one first; when it fails, a child (`smbbridge`, own session, password wiped from its arguments) connects
+  to the share and serves it as NFSv3 on 127.0.0.1:20491 and up; the parent mounts that read-only (it must be: `rm -rf` above).
+  4 SMB connections (3 for data), 32 x 1 MB cache, 10 blocks of read-ahead. Lost connections are retried for 22 s. Cache freed
+  20 s, process ended 15 min after the unmount (a lazy unmount can have a paused film behind it).
+- `umount.cifs`: `umount2` for our mounts (the real one refuses other file systems).
+
+`hwcrypto.c`: the SoC is a Cortex-A53 in 32-bit mode; AES, PMULL and SHA instructions work although /proc/cpuinfo does not list
+them (probed with SIGILL, C code otherwise). AES-CMAC 6594, AES-CCM 2621, SHA-256 1112 Mbit/s (libsmb2's C: 49, 25, 177).
+
+Log: `/tmp/smbbr/log` (no passwords).
+
+**`dvcm` addition (v2.3.0), `c4_full`** (cave 2, called from `c4_l5`): L5 offsets of a release cropped from 16:9 that still count
+the cut bars. Source shown whole (x = y = 0), bar = (9/16 x width - height) / 2 > 0, and |top - bar|, |bottom - bar| both <= width / 256:
+top = bottom = 0 (example: 3840x1920, L5 107 / 107, bar 120). A genuinely letterboxed picture inside a cropped frame with just that
+offset would be taken for one (3840x1920: 2.24:1 to 2.33:1).
+
+## Part 10: HDR10+ (`dvhook.sh`, `hdr10p.sh`, v2.3.0)
+
+`bdpdrv1` has the whole chain: the HEVC decoder copies the ST 2094-40 SEI (`i4VDecH265SEIPsr`, 0x7eb263c8; stream type 4 at
+instance +0x6503c), `VDP_Routine` builds the 27-byte VSIF (OUI 90-84-8B) per frame and `vVdpSetHdr10PlusMetadata` sends it when
+`bVDPHdr10PlusOutEnable` is set. The player program sets that (0x7ce5ec) when the source type is 5 (HDR10+), the TV's
+EDID has the HDR10+ block and HDR Setting is Auto.
+
+- **MKV source type:** liblp gives HDR10 (1). `mkv_scan` looks at the first block of the first HEVC track (`h10_blk`, section `.h10` in
+  `vMPCTestPlayMpgThr` 0x5334d8, 0x2e0 bytes): SEI 4, B5 003C 0001 04 before the first slice. `eMPCScomMapVideoHdrType` 0x5275dc
+  (HDR10 -> 2) jumps to `k_hdr` -> `h10_map`: 5 for such a file while it plays (option `hdr10plus`). Dolby Vision codecs set 3
+  after that.
+- **Dolby Vision and HDR10+ in one file:** `k_mmed` in front of dvhook's H2 -> `h10_pick`: profile 7, or 8 with compatibility 1 or 6, and
+  HDR10+ found. The TV's dynamic HDR byte is +0x94 of what `c_scom_get_support_format` (0x5e3e88; CXUHD 0x5d87d0) fills in
+  (handle at the string table - 0x778c): 0x10 HDR10+, 0x02 Dolby Vision. HDR10+ is taken when the TV has it and it is preferred or
+  the TV has no Dolby Vision: the Dolby Vision record is forgotten, as with `dv_mkv = off`. Options byte: struct ml +0xfc.
+- **Keyframes (`hdr10p.sh`):** `i4VDecH265SPSPsr` sets the type to 1 (HDR10) at every PQ SPS unless it is 2 (Dolby Vision) or 3. With SEI
+  before VPS / SPS / PPS (AUD CLL MDCV T35 VPS SPS PPS) every keyframe became HDR10: VSIF off, SDR / HDR10 packet, on again. 0x7eb22ea4
+  `strne` -> `strlo` (only 0 and 1 are set to 1).
+
+## Part 11: audio EDID override (`audedid.sh`, v2.3.0)
+
+`fgParserExtEDID` (0x7ebb8bb8) calls `vParserCEADataBlock`, which adds the audio descriptors to `_HdmiSinkAvCap` (0x7eea9788 on RU: +0x54
+format mask, +0x58.. per format, +0xd6 speakers). The hook runs it again on a built-in audio and speaker block. The code replaces
+`_SetUserAudDecEdid` (console command `hdmi.auddecedid`, unused; 0x7ebd6d38, 0x7ebd6d68 or 0x7ebd6d3c by driver build), so that
+command is "apply now": the same block, then `AVD_GetEdid` (the driver's copy), no hot-plug. Do not call `vClearEdidInfo` / `vCheckEDID`
+to read the EDID again: it fails outside a real hot-plug and leaves the player without a sink.
 
 ## Player program layouts
 

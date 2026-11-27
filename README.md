@@ -26,6 +26,11 @@ menus. And after every boot the player says on screen whether all patches loaded
 **Plus the options on the player (v2.1.2):** a new **Extras** page in the player's own Setup menu changes the
 options without a USB stick (English only for now). See [Setup > Extras page](#setup--extras-page-v212).
 
+**Plus HDR10+ from MKV (v2.3.0):** HEVC MKV files with HDR10+ play in HDR10+ on a TV that has it.
+
+**Plus SMB2 / SMB3 shares (v2.3.0):** servers without SMB1 (Windows, a NAS with SMB1 switched off) can be used from
+the player's own Network menu. See [SMB2 / SMB3 shares](#smb2--smb3-shares-v230).
+
 ---
 
 > ## ⚠️ DISCLAIMER: READ THIS FIRST
@@ -63,6 +68,9 @@ options without a USB stick (English only for now). See [Setup > Extras page](#s
 - [Video options (v2.0.2)](#video-options)
 - [Setup > Extras page (v2.1.2)](#setup--extras-page-v212)
 - [ISO files under Music (v2.2.0)](#iso-files-under-music-v220)
+- [SMB2 / SMB3 shares (v2.3.0)](#smb2--smb3-shares-v230)
+- [HDR10+ from MKV (v2.3.0)](#hdr10-from-mkv-v230)
+- [Audio EDID override (v2.3.0)](#audio-edid-override-v230)
 - [DLNA disc images (v2.1.0)](#dlna-disc-images-v210)
 - [Boot message (v2.1.0)](#boot-message-v210)
 - [Factory menu](#factory-menu)
@@ -95,6 +103,7 @@ With this fix installed:
 | DV profile 5 (single layer, IPT) | purple/green picture | **Dolby Vision** |
 | DV profile 7 FEL (base + full enhancement layer, single track) | HDR10 (base layer only) | **Dolby Vision, full FEL** |
 | DV profile 7 MEL (base + minimal enhancement layer, single track) | HDR10 (base layer only) | Dolby Vision (same code path as FEL, see [limitations](#known-limitations)) |
+| HDR10+ (HEVC, on a TV that has it, v2.3.0) | HDR10 | **HDR10+**, see [HDR10+ from MKV](#hdr10-from-mkv-v230) |
 | HDR10 / SDR | normal | normal (unchanged) |
 
 Audio (tested with AC-3 and Dolby TrueHD Atmos bitstreamed to an AV receiver, with correct lip sync), pause and
@@ -150,7 +159,10 @@ MKV fix, and every place is checked before it is written.
 | *️⃣ | **No italics** in ASS and MP4 text subtitles; a `\|` starts a new line | MKV ASS, MP4 `tx3g`; all MKV/MP4 text | ✅ italics; `\|` is a character | v2.2.0 | [fix 28](#28-text-subtitles-encodings-tags-and-line-handling-v220) |
 | 🔊 | **Audio tracks after the 10th never available**; the file's last audio track took the place of the 10th | MKV with more than 10 audio tracks | ✅ the [language list](#language-list) chooses the 10; without a list the first 10 | v2.2.0 | [fix 29](#29-mkv-language-list-and-forced-subtitles-v220) |
 | 🏷️ | **Dolby TrueHD listed as "MLP"** in the audio menu | MKV with TrueHD (also Atmos) | ✅ "Dolby TrueHD" | v2.2.0 | [fix 29](#29-mkv-language-list-and-forced-subtitles-v220) |
-| 🔊 | **Dolby Atmos never named** (the firmware has no Atmos text at all) | MKV with TrueHD Atmos | ✅ "Dolby Atmos" in the info bar, the audio menu and the IP control answer | v2.2.0 | [fix 29](#29-mkv-language-list-and-forced-subtitles-v220) |
+| 🔊 | **Dolby Atmos never named** (the firmware has no Atmos text at all) | MKV with TrueHD Atmos | ✅ "Dolby TrueHD Atmos" / "Dolby DD+ Atmos" in the info bar, the audio menu and the IP control answer (DD+ from v2.3.0) | v2.2.0 | [fix 29](#29-mkv-language-list-and-forced-subtitles-v220) |
+| 🏷️ | **Audio tracks without a language** in the audio menu (mkvmerge leaves it out for English, MKV's default) | MKV | ✅ "English" | v2.3.0 | [changelog](#changelog) |
+| 🏷️ | **Subtitle menu shows only the language** | MKV | ✅ format (SRT, ASS, VTT, PGS, VobSub) and "Forced" too | v2.3.0 | [changelog](#changelog) |
+| 💬 | **Italic text without outline** and with jagged edges | embedded text subtitles | ✅ like the rest of the text | v2.3.0 | [changelog](#changelog) |
 | 💬 | **PGS subtitles never appear** when chosen after playback started on a text or VobSub subtitle | MKV with PGS and other subtitle types | ✅ shown, at the right time | v1.9.0 | [fix 20](#20-pgs-subtitles-together-with-other-subtitle-types-v190) |
 | 💬 | **Nothing appears after leaving a PGS track**, and the **last PGS line stays stuck** on screen | MKV that starts on PGS and has other subtitle types | ✅ every type shown, PGS line cleared | v1.9.0 | [fix 20](#20-pgs-subtitles-together-with-other-subtitle-types-v190) |
 | ⏱️ | **PGS lines flash by or are lost after a seek**; lines appear as soon as they are read, not at their time | the same MKVs, on the PGS track | ✅ on and off at their times, also after seeks | v1.9.0 | [fix 21](#21-pgs-subtitle-timing-and-seeks-v190) |
@@ -340,6 +352,10 @@ menu_refresh = 60
 default_language = en
 boot_message = on
 dlna_iso = on
+hdr10plus = on
+dynamic_hdr = dv
+audio_edid_override = off
+smb23 = on
 setup_extras = on
 ```
 
@@ -353,6 +369,10 @@ setup_extras = on
 | `default_language` | `en de fr es it sv nl pl zh zh-tw ja ru`, `stock` | the languages a factory reset sets |
 | `boot_message` | `on` (shipped), `off` | the "all patches loaded" message after each boot, see [Boot message](#boot-message-v210) |
 | `dlna_iso` | `on` (shipped), `off` | disc images over DLNA, see [DLNA disc images](#dlna-disc-images-v210) |
+| `hdr10plus` | `on` (shipped), `off` | HDR10+ from HEVC MKV files, when the TV reports HDR10+ and HDR Setting is Auto (v2.3.0) |
+| `dynamic_hdr` | `dv` (shipped), `hdr10plus` | MKV files with both Dolby Vision (profile 7, or 8 with an HDR10 base) and HDR10+: which one, when the TV has both; a TV with only one gets that one (v2.3.0) |
+| `audio_edid_override` | `on`, `off` (shipped) | All audio formats (7.1 PCM to 192 kHz, DD, DD+ / TrueHD Atmos, DTS, DTS-HD, DTS:X) on the main HDMI output, whatever the TV or receiver reports; all or nothing. For a receiver that passes on a stereo EDID (zone 2). A device that cannot decode them gives silence or noise. Tested with a simulated stereo EDID, not on a real zone 2 (v2.3.0) |
+| `smb23` | `on` (shipped), `off` | Network menu: servers without SMB1, see [SMB2 / SMB3 shares](#smb2--smb3-shares-v230) (v2.3.0) |
 | `setup_extras` | `on` (shipped), `off` | the Extras page in the Setup menu, see [Setup > Extras page](#setup--extras-page-v212) (v2.1.2) |
 
 ### `native_25p`: 25 and 30 frames/s at their own rate
@@ -413,6 +433,10 @@ the current value), OK on a value saves it, left goes back.
 | Reset Language | `default_language` | after the next power-on (and only for a factory reset, as before) |
 | Boot Message | `boot_message` | after the next power-on |
 | DLNA Disc Images | `dlna_iso` | after the next power-on |
+| SMB2 / SMB3 Shares | `smb23` | after the next power-on |
+| HDR10+ MKV | `hdr10plus` | at once, for the next file started |
+| Preferred HDR | `dynamic_hdr` | at once, for the next file started |
+| Audio EDID Override | `audio_edid_override` | after the next power-on |
 
 A change is written to the installed options file (`/mnt/ubi_boot/oppo-dv-mkv/options.txt`) at once; comments and
 other lines in it stay. The help line at the bottom says what each row does; on the Extras row itself it shows the
@@ -440,6 +464,71 @@ MKV fix installed, an ISO is listed under **both** Music and Video and opens the
 inside an ISO is not known while a folder is listed, so film images are shown under Music too. Under the hood an ISO counts
 as music while a Music list is open and as video in every other list. Only the RU 65-0131 program family with the
 jailbreak's ISO player (RU and USA jailbreak, jb_overlay V3, rebranded clones); elsewhere nothing changes.
+
+## SMB2 / SMB3 shares (v2.3.0)
+
+The player's network code (Linux kernel 3.10 and Samba 3.0) only speaks **SMB1**. Windows has it switched off, and many
+NAS systems too, so such servers were not listed or could not be opened. With the Dolby Vision MKV fix installed:
+
+| | Stock | v2.3.0 |
+|---|---|---|
+| A server without SMB1 | not listed, or an error when opened | listed in Network, opens like any other |
+| User and password | | the player's own login box |
+| Server with SMB1 | works | works, **exactly as before** |
+
+Nothing has to be set up. The player's own way is always tried first; SMB2 / SMB3 (2.0.2 to 3.1.1, signed or encrypted) is
+used only where that fails. `smb23 = off` in the options, or **SMB2 / SMB3 Shares** in Setup > Extras, turns it off.
+
+**How:** the player runs system programs for everything about network shares (find servers, log in, mount, unmount).
+A small program, put in front of four of them in memory, runs the original first and steps in when it fails. A share is
+then read with libsmb2 and handed to the player's kernel over NFS, on the player itself and read-only. To find servers
+that do not announce themselves, port 445 of the addresses on the player's own network is tried when the player
+searches for servers (about one second). Details: [docs/TECHNICAL.md](docs/TECHNICAL.md), Part 9.
+
+**Speed** (gigabit, one player): an SMB 3.1.1 share about 77 MB/s, an encrypted one about 74 MB/s; UHD video needs at most
+about 16 MB/s. The player's processor has AES and SHA instructions that its kernel does not list; they are used for signed
+and encrypted shares.
+
+**If the server goes away** during playback, reading waits up to about 20 seconds and goes on when it is back.
+
+**Limits:** the player only lists servers on its own network (same address range, as before). After a wrong
+password the player tries four times, so a server with strict lockout rules can lock the account. Servers that accept
+**only** AES-GCM encryption do not work (AES-CCM is used).
+
+## HDR10+ from MKV (v2.3.0)
+
+The UDP-203's hardware and driver can send HDR10+, but MKV files always went out as HDR10. HEVC MKV files with HDR10+ data now
+play in HDR10+ when the TV reports it and HDR Setting is Auto. Nothing to set up.
+
+Files with **both** Dolby Vision (profile 7, or 8 with an HDR10 base) and HDR10+:
+
+| TV has | Preferred HDR = Dolby Vision (default) | Preferred HDR = HDR10+ |
+|---|---|---|
+| both | Dolby Vision | HDR10+ |
+| HDR10+ only | HDR10+ | HDR10+ |
+| Dolby Vision only | Dolby Vision | Dolby Vision |
+
+Profile 5 has no HDR10 base and always plays in Dolby Vision. **Preferred HDR** in Setup > Extras (or `dynamic_hdr`) chooses, from
+the next file on; **HDR10+ MKV** = Off (or `hdr10plus = off`) turns HDR10+ off. During HDR10+ the player's own IP control
+answer about the HDR type reads "SDR"; the TV shows HDR10+. Details: [docs/TECHNICAL.md](docs/TECHNICAL.md), Part 10.
+
+A fault of the player's driver was fixed for this: with the data order of most web releases, HDR10+ was switched off and
+on again at every keyframe, and the TV stuttered.
+
+## Audio EDID override (v2.3.0)
+
+Some receivers pass on the audio formats of the TV or projector instead of their own, for example on a zone 2 output. The
+player then sends stereo to a receiver that could play Atmos. **Audio EDID Override** in Setup > Extras (or
+`audio_edid_override = on`; **off as shipped**, after the next power-on) makes the player take the device on its main HDMI output
+for one that plays PCM up to 7.1 and 192 kHz, Dolby Digital, DD+ and TrueHD with Atmos, DTS, DTS-HD and DTS:X, whatever it
+reports. All or nothing. Video and HDR are not touched.
+
+- **A device that cannot decode these formats gives silence or noise.** Leave it off unless you need it.
+- Only the main HDMI output; no DSD. Turning it off works from the next power-on.
+- Tested with a **simulated** stereo receiver: TrueHD Atmos went out as 2-channel PCM without it and as a bitstream with it.
+  **Not tested on a real zone 2**: whether a receiver decodes what it did not ask for is up to the receiver.
+
+Details: [docs/TECHNICAL.md](docs/TECHNICAL.md), Part 11.
 
 ## DLNA disc images (v2.1.0)
 
@@ -587,6 +676,7 @@ writes why.
 | RU 65-0131 free jailbreak | **tested** (Dolby Vision fix + subtitles + factory menu) |
 | USA-region player (v65) | Dolby Vision fix supported since v1.3.1 (USA driver build). **Confirmed by a user with v1.3.1 and jb_overlay**: P7 MEL and FEL MKVs with fast-forward, rewind, chapter skips both ways and playing to the end, P8.1, and the uninstaller. Subtitle improvements and factory menu (since v1.5.0): the USA jailbreak runs the RU 65-0131 player program with a few jailbreak changes, so the RU layout applies (checked offline on dumps from several USA players); a stock US program gets the US layout; **untested on a USA player** |
 | Cambridge Audio CXUHD (firmware 66-0614, jailbroken) | Dolby Vision fix: its driver (data −0x8) is recognised; **confirmed by a user with v1.4.0** (MKV Dolby Vision plays). Subtitle improvements: CXUHD layout (since v1.5.0), checked offline, **untested on a player**. Factory menu: nothing to install, its own code opens the page with BLUE 2 4 5 8 (see [Factory menu](#factory-menu)) |
+| v2.3.0 parts on players other than RU 65-0131 | HDR10+, Preferred HDR and the audio EDID override are checked offline on dumps of the US and CXUHD drivers and all regional programs, **untested on a player**. The Extras page exists for the RU 65-0131 program and its jailbreak copies only: elsewhere use `oppo-dv-mkv-options.txt` |
 | Third driver build (data +0x50, `check` reports `driver data+0x50`) | Dolby Vision fix supported since v1.3.1, checked against a driver dump; **untested on a player** |
 | Any of the above with **jb_overlay** (themes) | Dolby Vision fix: chains to the overlay. Subtitle improvements and factory menu: patch the overlay's copy of the player program (jb_overlay V3 runs the RU program), **untested on a player**; with the dark theme the subtitle menu squares keep the theme's colours |
 | Other jailbreaks on v65 firmware (other regions or variants) | Dolby Vision fix should work if the check passes (it then reports the driver's data offset); **untested**, at your own risk. Subtitle improvements and factory menu: installed when the program matches one of the known layouts (RU, EU, AU, CN, TW, JP, US, CXUHD), otherwise skipped |
@@ -685,6 +775,7 @@ are not.
 
 ## Known limitations
 
+- **Audio EDID override (v2.3.0):** not tested on a real zone 2, see [Audio EDID override](#audio-edid-override-v230).
 - **Text subtitles (v2.2.0):**
   - **External `.srt` files** are drawn by a different part of the player: there, **italics** are not shown,
     **`{\an8}`** is ignored (bottom of the screen), a `|` still starts a new line, and a subtitle that wraps to a
@@ -699,6 +790,10 @@ are not.
   server; a link into a `BDMV` folder on a plain web server plays only that file, the stock way. Throughput is the
   server's: tested at 15-16 MB/s, enough for UHD discs, but slower servers stutter. Only the RU 65-0131 program family
   (see [DLNA disc images](#dlna-disc-images-v210)). DVD disc images and DVD folders were not tested.
+- **HDR10+ (v2.3.0):** HEVC in MKV only (not MP4 / TS files); tested with one film and one TV (Hisense).
+  Dolby Vision profile 5 has no HDR10 base and always plays in Dolby Vision.
+- **SMB2 / SMB3 shares (v2.3.0):** tested with Samba (SMB 2.1 to 3.1.1) only: Windows was **not** tested, nor disc images and
+  disc folders from such a share. Servers on the player's own network only; no AES-GCM-only encryption.
 - **Boot message (v2.1.0):** English only. If the screen saver is on when the message comes (more than about 25
   seconds without a key at boot), it is not seen. Only the RU 65-0131 program family.
 - **Single-track profile 7 only.** Almost all P7 MKVs (MakeMKV, mkvmerge) store the base layer, the enhancement
@@ -1784,6 +1879,27 @@ Checked from the TV's picture and the player's IP control answers.
 | Setup > Extras: Forced Subtitles Only On / Off | | ✅ switched at once (next file), `options.txt` rewritten |
 | Setup > Extras in German, Simplified Chinese, Japanese, Russian (after the restart Oppo asks for) and back to English | English texts; the Extras row read "Exit" after a language change | ✅ translated texts, Extras and Exit rows right |
 
+### HDR10+, SMB2 / SMB3 and the audio EDID override (v2.3.0)
+
+On one player (RU), with a Hisense TV that has Dolby Vision and HDR10+, an LG C1 (Dolby Vision only) and a Denon receiver.
+
+| Test | Stock | With the fix |
+|---|---|---|
+| HEVC MKV with HDR10+, TV with HDR10+ | HDR10 | ✅ HDR10+ on the TV, no stutter |
+| Same file, data order of web releases (SEI before the stream headers) | | ✅ HDR10+ all the time; without `hdr10p.sh` it dropped out at keyframes |
+| Same file, TV without HDR10+ | HDR10 | ✅ HDR10, no HDR10+ packet |
+| Dolby Vision + HDR10+ file, TV with both, Preferred HDR = Dolby Vision / HDR10+ | HDR10 | ✅ Dolby Vision / HDR10+ (the player's state, 300 of 300 samples; not looked at on the TV) |
+| Same file, TV with Dolby Vision only, Preferred HDR = HDR10+ | HDR10 | ✅ Dolby Vision |
+| Same file, TV without Dolby Vision (simulated) | HDR10 | ✅ HDR10+ (the player's state) |
+| Profile 5 and profile 7 files without HDR10+, Preferred HDR = HDR10+ | | ✅ Dolby Vision |
+| Audio EDID override, receiver taken for stereo (simulated), TrueHD Atmos | 2-channel PCM | ✅ bitstream, as with the receiver's own formats |
+| Audio EDID override, HDMI plugged in again | | ✅ formats there, picture normal |
+| Audio EDID override on from boot, TrueHD Atmos | Atmos on the receiver | ✅ Atmos on the receiver |
+| Audio EDID override, HDR10+ and L5 patches on the RU, US and CXUHD driver dumps and a clone's | | ✅ offline: on, off, every byte checked (override code run in emulation) |
+| Player program places for Preferred HDR and the subtitle menu: RU, EU, AU, CN, TW, JP, US, USA jailbreak, CXUHD 66 | | ✅ found in all, offline |
+
+Not tested: a real Samsung (HDR10+ only), a real zone 2, Windows SMB shares, ISO / BDMV over SMB2 / SMB3, players other than the RU one.
+
 ### Final regression run (persistent install, fresh boot)
 
 | Test | Result |
@@ -1821,6 +1937,8 @@ program if that file exists. The installer puts there:
 /mnt/ubi_boot/oppo-dv-mkv/hvccfix.sh  kernel patch, MKVs without VPS/SPS/PPS in the hvcC (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/ftrfix.sh   kernel patch, hang at the next file after a stopped MP4 (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/mp4elfix.sh kernel patch, profile 7 MP4s that stop after a second (on|off|status|check)
+/mnt/ubi_boot/oppo-dv-mkv/hdr10p.sh   kernel patch, HDR10+ lost at keyframes (on|off|status|check)
+/mnt/ubi_boot/oppo-dv-mkv/audedid.sh  kernel patch, audio EDID override (only with audio_edid_override = on; on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/subs.sh     subtitle patch (one layout per regional v65 player program; check)
 /mnt/ubi_boot/oppo-dv-mkv/image_bdp83.bin  subtitle colour menu image, built at install time, swapped into /res at boot
 /mnt/ubi_boot/oppo-dv-mkv/alacdec.bin, bdpaudec.db  ALAC audio decoder of firmware 56/60 and the player's audio decoder
@@ -1832,6 +1950,7 @@ program if that file exists. The installer puts there:
 /mnt/ubi_boot/oppo-dv-mkv/bootmsg.sh, bootmsg.bin  boot message in the player's own popup (show TEXT [MS]|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/dlnaiso, dlnaiso.sh, dmrhook.sh, dmrhook.bin  DLNA disc images: local NFS server, its helper,
                                       player hook (on|off|status|check)
+/mnt/ubi_boot/oppo-dv-mkv/smbbr, smbbr.sh  SMB2 / SMB3 for the Network menu (on|off|status|check)
 /mnt/ubi_boot/oppo-dv-mkv/xtmenu.sh, xtload.bin, xtmenu.bin  Setup > Extras page (on [VERSION]|status|check)
 /mnt/ubi_boot/oppo-dv-mkv-extras/     optional add-ons by other authors, started at boot (see Extras; not installed by oppo-dv-mkv)
 ```
@@ -1897,6 +2016,30 @@ requests.
 </p>
 
 ## Changelog
+
+- **v2.3.0-beta: HDR10+ from MKV; SMB2 / SMB3 shares; Extras page scrolling; updating.** A beta: tested on one player (RU).
+  - **HDR10+:** the player's driver can send HDR10+, but MKV files were always handed on as HDR10. HEVC MKV files with HDR10+
+    data now play in HDR10+ on a TV that reports it (`hdr10plus`, on; also in Setup > Extras). Files with Dolby Vision too:
+    `dynamic_hdr` ("Preferred HDR") chooses, and a TV without Dolby Vision gets HDR10+. A driver bug that switched
+    HDR10+ off and on at every keyframe (stutter) with the data order of web releases is fixed too.
+  - **Audio EDID override** (`audio_edid_override`, off; also in Setup > Extras): every audio format whatever the EDID says,
+    for a receiver that passes on the stereo EDID of a TV or projector.
+  - **SMB2 / SMB3:** servers without SMB1 in the player's own Network menu, on by default (`smb23`, also in Setup >
+    Extras). Servers with SMB1 work as before. Contains libsmb2 (LGPL 2.1, `oppo-dv-mkv-licences.txt`). See
+    [SMB2 / SMB3 shares](#smb2--smb3-shares-v230).
+  - **Setup > Extras:** with more than 7 rows, the highlight and help line stayed behind at the ends of the list; fixed,
+    also in the Reset Language list and for the line next to "Extras".
+  - **Updating** while the installed version was still loading could end in "NOT loaded: hvcC" on that boot (gone
+    after the next restart). The installer now waits until it has loaded.
+  - **Subtitles:** italic, bold and underlined text (embedded subtitles) has the outline and smooth edges of the rest.
+    Lines at the top (`{\an8}`) keep the same distance from the edge as lines at the bottom and follow Subtitle Shift,
+    in the opposite direction. The subtitle menu shows the format and "Forced" for MKV tracks.
+  - **Dolby Vision L5 in cropped releases:** files whose black bars were cut off (e.g. 3840x1920) but whose metadata still
+    counts them made the TV hide picture at the top and bottom, and the bottom edge jump with the subtitles. Such
+    offsets (within width / 256 of the missing bar) are recognised and the whole picture is shown.
+  - **Audio names:** "Dolby TrueHD Atmos" and, new, "Dolby DD+ Atmos" (both kinds in one file: "Dolby Atmos"). MKV
+    audio tracks without a language element are English (Matroska's default); they had no name.
+  - Updating adds `smbbr`, `smbbr.sh`, `hdr10p.sh` and `audedid.sh`.
 
 - **v2.2.0-beta: text subtitles, MKV track languages, forced subtitles, Dolby Atmos name, ISO files under Music.** A
   beta: tested on one player (RU) and one TV (LG C1).

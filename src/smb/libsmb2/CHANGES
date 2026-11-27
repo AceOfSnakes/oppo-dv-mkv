@@ -1,0 +1,112 @@
+libsmb2 6.0 (commit b9444620ba7f26ed216a663bf2282a9427e36c36), changed 2026-11-25 for oppo-dv-mkv: AES-CMAC, AES-CCM
+and SHA-256 go through hwcrypto.c (ARMv8 instructions, with a C fallback). lib/krb5-wrapper.c is left out. The changes:
+
+--- a/lib/aes128ccm.c
++++ b/lib/aes128ccm.c
+@@ -34,6 +34,7 @@
+ 
+ #include "portable-endian.h"
+ #include "aes.h"
++#include "../../hwcrypto.h"
+ 
+ static void aes_ccm_generate_b0(unsigned char *nonce, size_t nlen,
+                                 size_t alen, size_t plen, size_t mlen,
+@@ -159,6 +160,7 @@
+ {
+         unsigned char s[16] _U_;
+ 
++        if (mlen == 16 && hw_ok()) { hw_ccm_crypt(key, nonce, nlen, aad, alen, p, plen, m, 0); return; }
+         ccm_generate_T(key, nonce, nlen, aad, alen, p, plen, m, mlen);
+         ccm_generate_s(key, nonce, nlen, plen, 0, &s[0]);
+         bxory(m, &s[0], mlen);
+@@ -175,6 +177,8 @@
+         unsigned char s[16] _U_;
+         unsigned char tmp[16];
+ 
++        if (mlen == 16 && hw_ok()) { hw_ccm_crypt(key, nonce, nlen, aad, alen, p, plen, tmp, 1); return memcmp(tmp, m, mlen); }
++
+         aes_ccm_crypt(key, nonce, nlen, p, plen);
+ 
+         ccm_generate_T(key, nonce, nlen, aad, alen, p, plen, tmp, mlen);
+--- a/lib/smb2-signing.c
++++ b/lib/smb2-signing.c
+@@ -63,6 +63,7 @@
+ #define CBC 1
+ 
+ #include "aes.h"
++#include "../../hwcrypto.h"
+ #include "sha.h"
+ #include "sha-private.h"
+ 
+@@ -178,6 +179,12 @@
+                 /* combine the buffers into one */
+                 uint8_t *msg = NULL;
+ 
++                if (hw_ok() && niov <= 64) {
++                        struct hw_iov hv[64];
++                        for (i = 0; i < niov; i++) { hv[i].p = iov[i].buf; hv[i].n = iov[i].len; }
++                        hw_cmac(smb2->signing_key, hv, (int)niov, signature);
++                        return 0;
++                }
+                 for (i=0; i < niov; i++) {
+                         len += iov[i].len;
+                 }
+--- a/lib/sha224-256.c
++++ b/lib/sha224-256.c
+@@ -38,6 +38,8 @@
+ 
+ #include "compat.h"
+ 
++#include <string.h>
++#include "../../hwcrypto.h"
+ #include "sha.h"
+ #include "sha-private.h"
+ /* Define the SHA shift, rotate left and rotate right macro */
+@@ -245,6 +247,30 @@
+   if (context->Corrupted)
+     return context->Corrupted;
+ 
++  if (hw_ok())
++    {
++      while (length)
++        {
++          if (context->Message_Block_Index == 0 && length >= 64)
++            {
++              size_t n = length / 64; uint64_t L = ((uint64_t)context->Length_High << 32 | context->Length_Low) + (uint64_t)n * 512;
++              hw_sha256(context->Intermediate_Hash, message_array, n);
++              context->Length_Low = (uint32_t)L; context->Length_High = (uint32_t)(L >> 32);
++              message_array += n * 64; length -= n * 64;
++            }
++          else
++            {
++              size_t l = 64 - context->Message_Block_Index; uint64_t L;
++              if (l > length) l = length;
++              memcpy(context->Message_Block + context->Message_Block_Index, message_array, l);
++              context->Message_Block_Index += l; L = ((uint64_t)context->Length_High << 32 | context->Length_Low) + (uint64_t)l * 8;
++              context->Length_Low = (uint32_t)L; context->Length_High = (uint32_t)(L >> 32);
++              message_array += l; length -= l;
++              if (context->Message_Block_Index == 64) SHA224_256ProcessMessageBlock (context);
++            }
++        }
++      return shaSuccess;
++    }
+   while (length-- && !context->Corrupted)
+     {
+       context->Message_Block[context->Message_Block_Index++] =
+@@ -455,9 +481,16 @@
+  *   single character names, were used because those were the
+  *   names used in the publication.
+  */
++static void sw_block (SHA256Context * context);
+ static void
+ SHA224_256ProcessMessageBlock (SHA256Context * context)
+ {
++  if (hw_ok()) { hw_sha256(context->Intermediate_Hash, context->Message_Block, 1); context->Message_Block_Index = 0; return; }
++  sw_block(context);
++}
++static void
++sw_block (SHA256Context * context)
++{
+   /* Constants defined in FIPS-180-2, section 4.2.2 */
+   static const uint32_t K[64] = {
+     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b,

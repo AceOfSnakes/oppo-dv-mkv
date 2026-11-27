@@ -316,9 +316,32 @@ k_thd:                         @ CLpMkvParser::eMapPBAudioCodec 0x3bac6c "mov r0
     mov r2, r1
     mov r0, r5
     mov r1, r6
-    bl mkv_thd                 @ (parser, record, base) -> 0x1a, or 8 (Atmos)
+    mov r3, #0x1a
+    bl mkv_thd                 @ (parser, record, base, code) -> code, or 8 (Atmos)
     pop {r1-r3, r12, lr}
     bx lr
+k_ddp:                         @ the same for 0x3bac44 "mov r0, #6" (A_EAC3)
+    push {r1-r3, r12, lr}
+    GETBASE
+    mov r2, r1
+    mov r0, r5
+    mov r1, r6
+    mov r3, #6
+    bl mkv_thd
+    pop {r1-r3, r12, lr}
+    bx lr
+    .section .ddp,"ax"
+    .arm
+k_alang:                       @ mrParseTrackEntry 0x3c0894 "strbeq ip, [sb, #0x88]" (bleq): an audio track without a Language
+    mov r3, #'e'               @ element is English (Matroska's default; mkvmerge leaves the element out for English)
+    strb r3, [r9, #0x88]
+    mov r3, #'n'
+    strb r3, [r9, #0x89]
+    mov r3, #'g'
+    strb r3, [r9, #0x8a]
+    cmp r0, r0                 @ (the beq behind it)
+    bx lr
+    .section .subtx3g,"ax"
 
 .macro FORGET orig
     push {r0-r3, r12, lr}
@@ -450,3 +473,46 @@ m_chgsp:                       @ MKV proxy vtable: mrChangeSpStNo(r0 = proxy, r1
     pop {r0-r3, r12, lr}
     b orig_mkvchgsp
     .ltorg
+
+@ Subtitle menu row (player program; dvhook.sh puts a jump here at the site, see ROWS in mkinstall.py): Thumb caller,
+@ r6 = row, sp+0x98 = its text. Continues where the stock code copies the text out.
+    .section .subtext,"ax"
+    .arm
+    .global r_row
+r_row:
+    push {r0-r3, r12, lr}
+    GETBASE
+    mov r2, r1                 @ base
+    ldr r3, r_site             @ the two literals (language byte, string table) in the player program
+    mov r0, r6
+    add r1, sp, #(24 + 0x98)
+    bl sub_row
+    pop {r0-r3, r12, lr}
+    ldr pc, r_back
+    .global r_site
+    .global r_back
+r_site: .word 0                @ written by dvhook.sh
+r_back: .word 0
+
+    .section .h10,"ax"
+    .arm
+    .global k_hdr
+k_hdr:                         @ eMPCScomMapVideoHdrType 0x5275dc "mov r0, #2" (b; its bx lr returns)
+    push {r1-r3, r12, lr}
+    GETBASE
+    mov r0, r1
+    bl h10_map
+    pop {r1-r3, r12, pc}
+
+    .global k_mmed
+k_mmed:                        @ mrMkvSetFileInf 0x3d252c (bl, in front of dvhook's h2_mmed)
+    push {r0-r3, r12, lr}
+    GETBASE
+    mov r0, r1
+    bl h10_pick
+    pop {r0-r3, r12, lr}
+    b h2_mmed
+    .global h_scom
+    .global h_hand
+h_scom: .word 0                @ c_scom_get_support_format, and where its handle is (player program)
+h_hand: .word 0
