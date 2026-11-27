@@ -1,4 +1,4 @@
-## Install screen
+## Install screen 2.4+
 
 |   English   | Deutch |  Russian |
 | :----------:   | :------: | :---------:  |
@@ -28,4 +28,4 @@
 |   English   | Deutch |  Russian |
 | :----------:   | :------: | :---------:  |
 | [![Extra version EN](./images/preview/extrav-en.png)](./images/extrav-en.png) | [![Extra version DE](./images/preview/extrav-de.png)](./images/extrav-de.png) | [![Extra version RU](./images/preview/extrav-ru.png)](./images/extrav-ru.png)
-| [![Extra menu EN](./images/preview/extrav-menu-en.png)](./images/extrav-menu-en.png) | [![Extra menu DE](./images/preview/extrav-menu-de.png)](./images/extrav-menu-de.png) | [![Extra menu RU](./images/preview/extrav-menu-ru.png)](./images/extrav-menu-ru.png)
+| [![Extra menu EN](./images/preview/extra-menu-en.png)](./images/extra-menu-en.png) | [![Extra menu DE](./images/preview/extra-menu-de.png)](./images/extra-menu-de.png) | [![Extra menu RU](./images/preview/extra-menu-ru.png)](./images/extra-menu-ru.png)
